@@ -1,0 +1,81 @@
+{
+  "name": "teleport-beams",
+  "displayName": "Teleport Beams",
+  "description": "Manage and connect to Teleport Beams from VS Code",
+  "version": "0.1.0",
+  "publisher": "teleport",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onView:beamsList"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "teleport-beams",
+          "title": "Beams",
+          "icon": "resources/beam-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "teleport-beams": [
+        {
+          "id": "beamsList",
+          "name": "Beams"
+        },
+        {
+          "id": "beamFiles",
+          "name": "Files",
+          "when": "beams.fileExplorerActive"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "beams.refresh", "title": "Refresh", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.create", "title": "Create Beam", "icon": "$(add)", "category": "Beams" },
+      { "command": "beams.delete", "title": "Delete Beam", "icon": "$(trash)", "category": "Beams" },
+      { "command": "beams.ssh", "title": "SSH into Beam", "icon": "$(terminal)", "category": "Beams" },
+      { "command": "beams.openFiles", "title": "Open Beam Files", "icon": "$(folder-opened)", "category": "Beams" },
+      { "command": "beams.publish", "title": "Publish Beam", "icon": "$(globe)", "category": "Beams" },
+      { "command": "beams.unpublish", "title": "Unpublish Beam", "category": "Beams" },
+      { "command": "beams.copyUrl", "title": "Copy URL", "category": "Beams" },
+      { "command": "beams.connect", "title": "Connect to Beam", "category": "Beams" },
+      { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
+      { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
+      { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
+      { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
+        { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
+        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "beams.ssh", "when": "view == beamsList", "group": "inline" },
+        { "command": "beams.openFiles", "when": "view == beamsList", "group": "1_connect" },
+        { "command": "beams.publish", "when": "view == beamsList && viewItem == beam", "group": "2_actions" },
+        { "command": "beams.unpublish", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
+        { "command": "beams.copyUrl", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
+        { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" }
+      ]
+    }
+  },
+  "scripts": {
+    "dev": "tsc -watch -p ./",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

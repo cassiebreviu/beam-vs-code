@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
-import { execOnBeam } from './tsh';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
+const exec = promisify(execFile);
 const SECRET_KEY = 'beams.githubPat';
 
-export async function setupGitCredentials(beamId: string, secrets: vscode.SecretStorage): Promise<void> {
+export async function setupGitCredentials(sshHost: string, secrets: vscode.SecretStorage): Promise<void> {
     const username = vscode.workspace.getConfiguration('beams').get<string>('github.username');
     const pat = await secrets.get(SECRET_KEY);
 
@@ -11,8 +13,8 @@ export async function setupGitCredentials(beamId: string, secrets: vscode.Secret
         return;
     }
 
-    await execOnBeam(beamId, ['bash', '-c', 'git config --global credential.helper store']);
-    await execOnBeam(beamId, ['bash', '-c', `echo "https://${username}:${pat}@github.com" > ~/.git-credentials`]);
+    const script = `git config --global credential.helper store && echo "https://${username}:${pat}@github.com" > ~/.git-credentials`;
+    await exec('ssh', ['-o', 'StrictHostKeyChecking=no', sshHost, script], { timeout: 15000 });
 }
 
 export async function promptAndStoreGithubPat(secrets: vscode.SecretStorage): Promise<void> {

@@ -2,9 +2,11 @@ import * as vscode from 'vscode';
 import { BeamItem } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
+import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat } from './github';
+import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import * as path from 'path';
 
@@ -60,6 +62,7 @@ export function registerCommands(
                                 await execOnBeam(b.id, ['bash', '-c', cmd]);
                             }
                         }
+                        await setupGitCredentials(b.id, context.secrets);
                         return b;
                     }
                 );
@@ -164,14 +167,27 @@ export function registerCommands(
             }
         }),
 
-        vscode.commands.registerCommand('beams.connect', (item: BeamItem) => {
+        vscode.commands.registerCommand('beams.connect', async (item: BeamItem) => {
             if (!item?.beam) {
                 return;
             }
-            openBeamTerminal(item.beam);
-            fileExplorer.setBeam(item.beam);
-            activityProvider.setBeam(item.beam);
-            vscode.commands.executeCommand('beamFiles.focus');
+            try {
+                const status = await checkStatus();
+                if (!status.loggedIn || !status.cluster) {
+                    vscode.window.showErrorMessage('Not logged in to Teleport. Use "Beams: Login" first.');
+                    return;
+                }
+                await setupGitCredentials(item.beam.id, context.secrets);
+                const host = ensureBeamSshConfig(item.beam.id, status.cluster);
+                const config = vscode.workspace.getConfiguration('remote.SSH');
+                if (!config.get<boolean>('enableRemoteCommand')) {
+                    await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);
+                }
+                const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}/home/beams`);
+                await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to connect: ${err instanceof Error ? err.message : err}`);
+            }
         }),
 
         vscode.commands.registerCommand('beams.ssh', (item: BeamItem) => {
@@ -248,6 +264,10 @@ export function registerCommands(
             await vscode.env.clipboard.writeText(item.beam.url);
             vscode.window.showInformationMessage('URL copied to clipboard.');
         }),
+
+        vscode.commands.registerCommand('beams.setGithubPat', () => promptAndStoreGithubPat(context.secrets)),
+
+        vscode.commands.registerCommand('beams.clearGithubPat', () => clearGithubPat(context.secrets)),
 
         vscode.commands.registerCommand('beams.export', async (item: BeamItem) => {
             if (!item?.beam) {

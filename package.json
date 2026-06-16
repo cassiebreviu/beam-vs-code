@@ -47,17 +47,20 @@
       { "command": "beams.publish", "title": "Publish Beam", "icon": "$(globe)", "category": "Beams" },
       { "command": "beams.unpublish", "title": "Unpublish Beam", "category": "Beams" },
       { "command": "beams.copyUrl", "title": "Copy URL", "category": "Beams" },
-      { "command": "beams.connect", "title": "Connect to Beam", "category": "Beams" },
+      { "command": "beams.connect", "title": "Open in VS Code (Remote-SSH)", "icon": "$(remote)", "category": "Beams" },
       { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
       { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
       { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
-      { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" }
+      { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" },
+      { "command": "beams.setGithubPat", "title": "Set GitHub PAT", "icon": "$(key)", "category": "Beams" },
+      { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
         { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
+        { "command": "beams.setGithubPat", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
@@ -72,6 +75,16 @@
         { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" }
       ]
+    },
+    "configuration": {
+      "title": "Beams",
+      "properties": {
+        "beams.github.username": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub username for automatic credential setup on new beams"
+        }
+      }
     }
   },
   "scripts": {

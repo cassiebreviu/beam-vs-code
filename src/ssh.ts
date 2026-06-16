@@ -49,7 +49,7 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
         `Host ${wildcardHost} !${cluster}`,
         '    StrictHostKeyChecking no',
         '    UserKnownHostsFile /dev/null',
-        `    ProxyCommand ${tshPath} proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)`,
+        `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
         '',
         `Host ${beamHost}`,
         `    HostName ${beamId}.${cluster}`,

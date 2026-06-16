@@ -65,7 +65,7 @@ export function registerCommands(
                         try {
                             const status = await checkStatus();
                             if (status.loggedIn && status.cluster) {
-                                const host = ensureBeamSshConfig(b.id, status.cluster);
+                                const host = await ensureBeamSshConfig(b.id, status.cluster);
                                 await setupGitCredentials(host, context.secrets);
                             }
                         } catch { /* non-fatal */ }
@@ -183,7 +183,7 @@ export function registerCommands(
                     vscode.window.showErrorMessage('Not logged in to Teleport. Use "Beams: Login" first.');
                     return;
                 }
-                const host = ensureBeamSshConfig(item.beam.id, status.cluster);
+                const host = await ensureBeamSshConfig(item.beam.id, status.cluster);
                 try {
                     await setupGitCredentials(host, context.secrets);
                 } catch { /* non-fatal — beam may not have git yet */ }

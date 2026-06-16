@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const exec = promisify(execFile);
 
 const MARKER_START = '# BEGIN Teleport Beams';
 const MARKER_END = '# END Teleport Beams';
@@ -39,6 +43,50 @@ function writeSshConfig(content: string): void {
     fs.writeFileSync(configPath, content, { mode: 0o600 });
 }
 
+async function getTshConfig(): Promise<string | null> {
+    try {
+        const tshPath = getTshPath();
+        const { stdout } = await exec(tshPath, ['config'], { timeout: 10000 });
+        return stdout;
+    } catch {
+        return null;
+    }
+}
+
+function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
+    const lines = tshConfig.split('\n');
+    const result: string[] = [];
+    let inClusterBlock = false;
+    let removedPort = false;
+
+    for (const line of lines) {
+        if (line.startsWith('Host ') && line.includes(cluster)) {
+            inClusterBlock = true;
+            result.push(line);
+            continue;
+        } else if (line.startsWith('Host ') && inClusterBlock) {
+            inClusterBlock = false;
+        }
+
+        if (inClusterBlock) {
+            if (line.trim().startsWith('Port ')) {
+                removedPort = true;
+                continue;
+            }
+            if (line.trim().startsWith('ProxyCommand ')) {
+                const tshPath = getTshPath();
+                result.push(`    StrictHostKeyChecking no`);
+                result.push(`    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`);
+                continue;
+            }
+        }
+
+        result.push(line);
+    }
+
+    return result.join('\n');
+}
+
 function buildBeamsBlock(cluster: string, beamId: string): string {
     const tshPath = getTshPath();
     const wildcardHost = `*.${cluster}`;
@@ -60,7 +108,7 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
     ].join('\n');
 }
 
-export function ensureBeamSshConfig(beamId: string, cluster: string): string {
+export async function ensureBeamSshConfig(beamId: string, cluster: string): Promise<string> {
     const host = `vscode+${beamId}.${cluster}`;
     let config = readSshConfig();
 
@@ -69,6 +117,56 @@ export function ensureBeamSshConfig(beamId: string, cluster: string): string {
         return host;
     }
 
+    // If there's an existing tsh-generated block for this cluster, patch its ProxyCommand
+    if (config.includes(`*.${cluster}`) && !config.includes(MARKER_START)) {
+        config = patchTshConfigForBeams(config, cluster);
+        const beamEntry = [
+            '',
+            MARKER_START,
+            `Host ${host}`,
+            `    HostName ${beamId}.${cluster}`,
+            '    User beams',
+            '    UserKnownHostsFile /dev/null',
+            '    RemoteCommand bash',
+            MARKER_END,
+        ].join('\n');
+        // Insert beam entry BEFORE the wildcard so it matches first
+        const wildcardIdx = config.indexOf(`Host *.${cluster}`);
+        if (wildcardIdx > 0) {
+            config = config.slice(0, wildcardIdx) + beamEntry + '\n\n' + config.slice(wildcardIdx);
+        } else {
+            config += '\n' + beamEntry + '\n';
+        }
+        writeSshConfig(config);
+        return host;
+    }
+
+    // No existing tsh config — try to generate it
+    if (!config.includes(MARKER_START)) {
+        const tshConfig = await getTshConfig();
+        if (tshConfig) {
+            const patched = patchTshConfigForBeams(tshConfig, cluster);
+            const block = [
+                MARKER_START,
+                `Host ${host}`,
+                `    HostName ${beamId}.${cluster}`,
+                '    User beams',
+                '    UserKnownHostsFile /dev/null',
+                '    RemoteCommand bash',
+                '',
+                patched,
+                MARKER_END,
+            ].join('\n');
+            if (config.length > 0 && !config.endsWith('\n')) {
+                config += '\n';
+            }
+            config += '\n' + block + '\n';
+            writeSshConfig(config);
+            return host;
+        }
+    }
+
+    // Fallback: write standalone block (no tsh config available)
     const markerIdx = config.indexOf(MARKER_START);
     if (markerIdx !== -1) {
         const endIdx = config.indexOf(MARKER_END);

@@ -9,6 +9,10 @@ const exec = promisify(execFile);
 const MARKER_START = '# BEGIN Teleport Beams';
 const MARKER_END = '# END Teleport Beams';
 
+function sshCluster(cluster: string): string {
+    return cluster.replace(/\.beams\.sh$/, '.beams.run');
+}
+
 function getTshPath(): string {
     if (process.platform === 'win32') {
         return 'tsh.exe';
@@ -54,15 +58,16 @@ async function getTshConfig(): Promise<string | null> {
 }
 
 function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
+    const shVariant = cluster.replace(/\.beams\.run$/, '.beams.sh');
     const lines = tshConfig.split('\n');
     const result: string[] = [];
     let inClusterBlock = false;
-    let removedPort = false;
 
     for (const line of lines) {
-        if (line.startsWith('Host ') && line.includes(cluster)) {
+        if (line.startsWith('Host ') && (line.includes(cluster) || line.includes(shVariant))) {
             inClusterBlock = true;
-            result.push(line);
+            // Rewrite the Host line to use the .beams.run domain
+            result.push(line.replace(shVariant, cluster));
             continue;
         } else if (line.startsWith('Host ') && inClusterBlock) {
             inClusterBlock = false;
@@ -70,7 +75,6 @@ function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
 
         if (inClusterBlock) {
             if (line.trim().startsWith('Port ')) {
-                removedPort = true;
                 continue;
             }
             if (line.trim().startsWith('ProxyCommand ')) {
@@ -108,7 +112,8 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
     ].join('\n');
 }
 
-export async function ensureBeamSshConfig(beamId: string, cluster: string): Promise<string> {
+export async function ensureBeamSshConfig(beamId: string, rawCluster: string): Promise<string> {
+    const cluster = sshCluster(rawCluster);
     const host = `vscode+${beamId}.${cluster}`;
     let config = readSshConfig();
 
@@ -118,7 +123,9 @@ export async function ensureBeamSshConfig(beamId: string, cluster: string): Prom
     }
 
     // If there's an existing tsh-generated block for this cluster, patch its ProxyCommand
-    if (config.includes(`*.${cluster}`) && !config.includes(MARKER_START)) {
+    // Also check for the .beams.sh variant since tsh config may have generated that
+    const rawClusterPattern = rawCluster !== cluster ? `*.${rawCluster}` : null;
+    if ((config.includes(`*.${cluster}`) || (rawClusterPattern && config.includes(rawClusterPattern))) && !config.includes(MARKER_START)) {
         config = patchTshConfigForBeams(config, cluster);
         const beamEntry = [
             '',
@@ -131,7 +138,10 @@ export async function ensureBeamSshConfig(beamId: string, cluster: string): Prom
             MARKER_END,
         ].join('\n');
         // Insert beam entry BEFORE the wildcard so it matches first
-        const wildcardIdx = config.indexOf(`Host *.${cluster}`);
+        let wildcardIdx = config.indexOf(`Host *.${cluster}`);
+        if (wildcardIdx === -1 && rawClusterPattern) {
+            wildcardIdx = config.indexOf(`Host ${rawClusterPattern}`);
+        }
         if (wildcardIdx > 0) {
             config = config.slice(0, wildcardIdx) + beamEntry + '\n\n' + config.slice(wildcardIdx);
         } else {

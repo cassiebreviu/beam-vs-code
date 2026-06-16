@@ -18,8 +18,11 @@ export interface TshStatus {
     validUntil: string;
 }
 
-async function runTsh(args: string[]): Promise<string> {
-    const { stdout } = await exec('tsh', args, { timeout: 30000 });
+async function runTsh(args: string[], options?: { timeout?: number }): Promise<string> {
+    const { stdout } = await exec('tsh', args, {
+        timeout: options?.timeout ?? 30000,
+        maxBuffer: 50 * 1024 * 1024,
+    });
     return stdout;
 }
 
@@ -74,7 +77,7 @@ export async function checkStatus(): Promise<TshStatus> {
 }
 
 export async function scpFromBeam(id: string, remotePath: string, localPath: string): Promise<void> {
-    await runTsh(['beams', 'scp', '-r', `${id}:${remotePath}`, localPath]);
+    await runTsh(['beams', 'scp', `${id}:${remotePath}`, localPath], { timeout: 300000 });
 }
 
 export async function isTshAvailable(): Promise<boolean> {

@@ -5,16 +5,35 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
+import { AgentActivityProvider } from './activity';
 import * as path from 'path';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
     provider: BeamsProvider,
-    fileExplorer: BeamFileExplorer
+    fileExplorer: BeamFileExplorer,
+    activityProvider: AgentActivityProvider
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('beams.refresh', () => {
             provider.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.login', async () => {
+            const cluster = await vscode.window.showInputBox({
+                prompt: 'Teleport cluster proxy address',
+                placeHolder: 'example.teleport.sh',
+            });
+            if (!cluster) {
+                return;
+            }
+            const terminal = vscode.window.createTerminal({
+                name: 'tsh login',
+                shellPath: process.platform === 'win32' ? 'tsh.exe' : 'tsh',
+                shellArgs: ['login', `--proxy=${cluster}`],
+                iconPath: new vscode.ThemeIcon('key'),
+            });
+            terminal.show();
         }),
 
         vscode.commands.registerCommand('beams.create', async () => {
@@ -151,6 +170,7 @@ export function registerCommands(
             }
             openBeamTerminal(item.beam);
             fileExplorer.setBeam(item.beam);
+            activityProvider.setBeam(item.beam);
             vscode.commands.executeCommand('beamFiles.focus');
         }),
 
@@ -243,8 +263,9 @@ export function registerCommands(
                 return;
             }
 
+            const homeDir = process.env.HOME || process.env.USERPROFILE || '';
             const saveUri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(`${item.beam.id}-export.tar.gz`),
+                defaultUri: vscode.Uri.file(path.join(homeDir, 'Downloads', `${item.beam.id}-export.tar.gz`)),
                 filters: { 'Tar files': ['tar.gz', 'tgz'] },
                 title: 'Save exported archive to...',
             });

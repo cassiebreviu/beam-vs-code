@@ -1,0 +1,228 @@
+import * as vscode from 'vscode';
+import { Beam, execOnBeam } from './tsh';
+
+interface AgentSession {
+    tokensIn: number;
+    tokensOut: number;
+    cacheRead: number;
+    cacheWrite: number;
+    costUsd: number;
+    toolCalls: ToolCall[];
+    messages: number;
+    model: string;
+}
+
+interface ToolCall {
+    tool: string;
+    args?: string;
+}
+
+const COST_PER_MILLION: Record<string, [number, number, number, number]> = {
+    'opus': [15, 18.75, 1.5, 75],
+    'sonnet': [3, 3.75, 0.3, 15],
+    'haiku': [0.8, 1.0, 0.08, 4],
+};
+
+function estimateCost(model: string, tokensIn: number, cacheWrite: number, cacheRead: number, tokensOut: number): number {
+    const key = Object.keys(COST_PER_MILLION).find(k => model.includes(k)) ?? 'sonnet';
+    const [inRate, cwRate, crRate, outRate] = COST_PER_MILLION[key]!;
+    return (tokensIn * inRate + cacheWrite * cwRate + cacheRead * crRate + tokensOut * outRate) / 1_000_000;
+}
+
+class ActivityItem extends vscode.TreeItem {
+    constructor(label: string, description?: string, icon?: string, collapsible?: vscode.TreeItemCollapsibleState) {
+        super(label, collapsible ?? vscode.TreeItemCollapsibleState.None);
+        this.description = description;
+        if (icon) {
+            this.iconPath = new vscode.ThemeIcon(icon);
+        }
+    }
+}
+
+export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<ActivityItem | undefined | null>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private currentBeam: Beam | undefined;
+    private session: AgentSession | undefined;
+    private pollInterval: NodeJS.Timeout | undefined;
+    private transcriptPath: string | undefined;
+
+    setBeam(beam: Beam): void {
+        this.currentBeam = beam;
+        this.session = undefined;
+        this.transcriptPath = undefined;
+        this.startPolling();
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    stop(): void {
+        if (this.pollInterval) {
+            clearInterval(this.pollInterval);
+            this.pollInterval = undefined;
+        }
+    }
+
+    private startPolling(): void {
+        this.stop();
+        this.poll();
+        this.pollInterval = setInterval(() => this.poll(), 5000);
+    }
+
+    private async poll(): Promise<void> {
+        if (!this.currentBeam) return;
+
+        try {
+            if (!this.transcriptPath) {
+                this.transcriptPath = await this.findTranscript();
+                if (!this.transcriptPath) return;
+            }
+
+            // Use tail to get the last 200 lines of the transcript
+            const output = await execOnBeam(this.currentBeam.id, [
+                'tail', '-n', '200', this.transcriptPath
+            ]);
+
+            if (!output.trim()) return;
+
+            const lines = output.split('\n').filter(l => l.trim());
+            this.parseTranscript(lines);
+            this._onDidChangeTreeData.fire(undefined);
+        } catch {
+            // transcript might not exist yet, retry finding it next poll
+            this.transcriptPath = undefined;
+        }
+    }
+
+    private async findTranscript(): Promise<string | undefined> {
+        if (!this.currentBeam) return undefined;
+        try {
+            // List jsonl files and pick the most recent by name (UUIDs sort by creation)
+            const output = await execOnBeam(this.currentBeam.id, [
+                'ls', '-t', '/home/beams/.claude/projects/-home-beams/'
+            ]);
+            const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
+            if (files.length === 0) return undefined;
+            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private parseTranscript(lines: string[]): void {
+        let tokensIn = 0;
+        let tokensOut = 0;
+        let cacheRead = 0;
+        let cacheWrite = 0;
+        let model = 'claude-sonnet-4';
+        const toolCalls: ToolCall[] = [];
+        let messages = 0;
+
+        for (const line of lines) {
+            try {
+                const parsed = JSON.parse(line);
+                if (!parsed.message) continue;
+
+                const msg = parsed.message;
+                if (msg.model) model = msg.model;
+
+                if (msg.usage) {
+                    tokensIn += msg.usage.input_tokens ?? 0;
+                    tokensOut += msg.usage.output_tokens ?? 0;
+                    cacheRead += msg.usage.cache_read_input_tokens ?? 0;
+                    cacheWrite += msg.usage.cache_creation_input_tokens ?? 0;
+                }
+
+                if (parsed.type === 'assistant' || parsed.type === 'user') {
+                    messages++;
+                }
+
+                if (Array.isArray(msg.content)) {
+                    for (const block of msg.content) {
+                        if (block.type === 'tool_use') {
+                            toolCalls.push({
+                                tool: block.name ?? '?',
+                                args: summarizeArgs(block.input),
+                            });
+                        }
+                    }
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        const costUsd = estimateCost(model, tokensIn, cacheWrite, cacheRead, tokensOut);
+
+        this.session = {
+            tokensIn,
+            tokensOut,
+            cacheRead,
+            cacheWrite,
+            costUsd,
+            toolCalls: toolCalls.slice(-30),
+            messages,
+            model,
+        };
+    }
+
+    getTreeItem(element: ActivityItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(element?: ActivityItem): ActivityItem[] {
+        if (!this.currentBeam) {
+            return [new ActivityItem('Select a beam to view activity', undefined, 'info')];
+        }
+
+        if (!this.session) {
+            return [new ActivityItem('No active session detected', 'polling...', 'loading~spin')];
+        }
+
+        if (element?.label === 'Tool Calls') {
+            return this.session.toolCalls.slice().reverse().map(tc => {
+                const desc = tc.args ? `${tc.args}` : '';
+                return new ActivityItem(tc.tool, desc, 'wrench');
+            });
+        }
+
+        const s = this.session;
+        const items: ActivityItem[] = [
+            new ActivityItem('Model', s.model, 'hubot'),
+            new ActivityItem('Tokens In', `${formatNumber(s.tokensIn)} (${formatNumber(s.cacheRead)} cached)`, 'arrow-down'),
+            new ActivityItem('Tokens Out', formatNumber(s.tokensOut), 'arrow-up'),
+            new ActivityItem('Cost', `$${s.costUsd.toFixed(4)}`, 'credit-card'),
+            new ActivityItem('Messages', `${s.messages}`, 'comment'),
+            new ActivityItem(
+                'Tool Calls',
+                `${s.toolCalls.length} recent`,
+                'tools',
+                s.toolCalls.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None
+            ),
+        ];
+
+        return items;
+    }
+}
+
+function formatNumber(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return `${n}`;
+}
+
+function summarizeArgs(input: unknown): string {
+    if (!input || typeof input !== 'object') return '';
+    const obj = input as Record<string, unknown>;
+    if (obj.file_path) return String(obj.file_path).split('/').pop() ?? '';
+    if (obj.path) return String(obj.path).split('/').pop() ?? '';
+    if (obj.command) {
+        const cmd = String(obj.command);
+        return cmd.length > 50 ? cmd.slice(0, 50) + '...' : cmd;
+    }
+    if (obj.query) {
+        const q = String(obj.query);
+        return q.length > 50 ? q.slice(0, 50) + '...' : q;
+    }
+    return '';
+}

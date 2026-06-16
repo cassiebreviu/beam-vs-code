@@ -30,6 +30,11 @@
           "id": "beamFiles",
           "name": "Files",
           "when": "beams.fileExplorerActive"
+        },
+        {
+          "id": "beamActivity",
+          "name": "Agent Activity",
+          "when": "beams.fileExplorerActive"
         }
       ]
     },
@@ -47,10 +52,12 @@
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
       { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
-      { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" }
+      { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
+      { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
+        { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }

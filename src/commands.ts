@@ -62,7 +62,9 @@ export function registerCommands(
                                 await execOnBeam(b.id, ['bash', '-c', cmd]);
                             }
                         }
-                        await setupGitCredentials(b.id, context.secrets);
+                        try {
+                            await setupGitCredentials(b.id, context.secrets);
+                        } catch { /* non-fatal */ }
                         return b;
                     }
                 );
@@ -177,7 +179,9 @@ export function registerCommands(
                     vscode.window.showErrorMessage('Not logged in to Teleport. Use "Beams: Login" first.');
                     return;
                 }
-                await setupGitCredentials(item.beam.id, context.secrets);
+                try {
+                    await setupGitCredentials(item.beam.id, context.secrets);
+                } catch { /* non-fatal — beam may not have git yet */ }
                 const host = ensureBeamSshConfig(item.beam.id, status.cluster);
                 const config = vscode.workspace.getConfiguration('remote.SSH');
                 if (!config.get<boolean>('enableRemoteCommand')) {

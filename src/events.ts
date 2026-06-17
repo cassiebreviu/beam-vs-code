@@ -33,13 +33,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
     private events: AgentEvent[] = [];
     private pollInterval: NodeJS.Timeout | undefined;
     private transcriptPath: string | undefined;
-    private lastLineCount = 0;
+    private lastContent = '';
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
         this.events = [];
         this.transcriptPath = undefined;
-        this.lastLineCount = 0;
+        this.lastContent = '';
         this.startPolling();
         this._onDidChangeTreeData.fire(undefined);
     }
@@ -78,10 +78,10 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
                 return;
             }
 
-            const lines = output.split('\n').filter(l => l.trim());
-            if (lines.length === this.lastLineCount) return;
+            if (output === this.lastContent) return;
+            this.lastContent = output;
 
-            this.lastLineCount = lines.length;
+            const lines = output.split('\n').filter(l => l.trim());
             this.events = this.parseEvents(lines);
             this._onDidChangeTreeData.fire(undefined);
         } catch {

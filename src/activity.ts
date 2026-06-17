@@ -86,7 +86,7 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
 
         try {
             if (!this.catCmd) {
-                this.catCmd = await this.buildCmd();
+                this.catCmd = await this.findTranscripts();
                 if (!this.catCmd) return;
             }
 
@@ -104,7 +104,7 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         }
     }
 
-    private async buildCmd(): Promise<string | undefined> {
+    private async findTranscripts(): Promise<string | undefined> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
@@ -113,8 +113,8 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
             const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
             if (files.length === 0) return undefined;
             const dir = '/home/beams/.claude/projects/-home-beams';
-            const tailCmds = files.map(f => `tail -n 200 ${dir}/${f}`).join('; ');
-            return `(${tailCmds})`;
+            const paths = files.map(f => `${dir}/${f}`).join(' ');
+            return `cat ${paths}`;
         } catch {
             return undefined;
         }

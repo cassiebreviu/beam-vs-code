@@ -110,11 +110,11 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
-                'ls', '-t', '/home/beams/.claude/projects/-home-beams/'
+                'bash', '-c', 'find /home/beams/.claude/projects -name "*.jsonl" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-'
             ]);
-            const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
-            if (files.length === 0) return undefined;
-            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
+            const path = output.trim();
+            if (!path) return undefined;
+            return path;
         } catch {
             return undefined;
         }

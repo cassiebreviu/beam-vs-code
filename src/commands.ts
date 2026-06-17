@@ -5,10 +5,11 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
-import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat } from './github';
+import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat, setupGithubOnBeam, openOAuthTerminal } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
+import { FileChangesProvider } from './fileChanges';
 import * as path from 'path';
 
 export function registerCommands(
@@ -16,7 +17,8 @@ export function registerCommands(
     provider: BeamsProvider,
     fileExplorer: BeamFileExplorer,
     activityProvider: AgentActivityProvider,
-    eventsProvider: AgentEventsProvider
+    eventsProvider: AgentEventsProvider,
+    fileChangesProvider: FileChangesProvider
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('beams.select', (item: BeamItem) => {
@@ -26,6 +28,7 @@ export function registerCommands(
             fileExplorer.setBeam(item.beam);
             activityProvider.setBeam(item.beam);
             eventsProvider.setBeam(item.beam);
+            fileChangesProvider.setBeam(item.beam);
         }),
 
         vscode.commands.registerCommand('beams.refresh', () => {
@@ -241,6 +244,25 @@ export function registerCommands(
             fileExplorer.refresh();
         }),
 
+        vscode.commands.registerCommand('beams.refreshFileChanges', () => {
+            fileChangesProvider.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.openChangeDiff', async (change: { beamId: string; path: string }) => {
+            if (!change) {
+                return;
+            }
+            try {
+                const headUri = vscode.Uri.parse(`beam://${change.beamId}/.git-diff-head/${change.path}`);
+                const workUri = vscode.Uri.parse(`beam://${change.beamId}/home/beams/${change.path}`);
+
+                const filename = change.path.split('/').pop() ?? change.path;
+                await vscode.commands.executeCommand('vscode.diff', headUri, workUri, `${filename} (HEAD ↔ Working)`);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to open diff: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
         vscode.commands.registerCommand('beams.publish', async (item: BeamItem) => {
             if (!item) {
                 return;
@@ -287,6 +309,140 @@ export function registerCommands(
         vscode.commands.registerCommand('beams.setGithubPat', () => promptAndStoreGithubPat(context.secrets)),
 
         vscode.commands.registerCommand('beams.clearGithubPat', () => clearGithubPat(context.secrets)),
+
+        vscode.commands.registerCommand('beams.setupGithub', async (item?: BeamItem) => {
+            const beamId = item?.beam?.id;
+            if (!beamId) {
+                vscode.window.showErrorMessage('Select a beam first.');
+                return;
+            }
+
+            const username = await vscode.window.showInputBox({
+                prompt: 'GitHub username',
+                placeHolder: 'octocat',
+            });
+            if (!username) {
+                return;
+            }
+
+            const email = await vscode.window.showInputBox({
+                prompt: 'Git email',
+                placeHolder: `${username}@users.noreply.github.com`,
+                value: `${username}@users.noreply.github.com`,
+            });
+            if (email === undefined) {
+                return;
+            }
+
+            const authChoice = await vscode.window.showQuickPick(
+                [
+                    { label: '$(globe) Full account access (OAuth)', description: 'Authenticate via browser — grants access to all your repos', method: 'oauth' as const },
+                    { label: '$(key) Fine-grained token (PAT)', description: 'Paste a token scoped to specific repos', method: 'pat' as const },
+                ],
+                { placeHolder: 'How would you like to authenticate with GitHub?' }
+            );
+            if (!authChoice) {
+                return;
+            }
+
+            let pat: string | undefined;
+            if (authChoice.method === 'pat') {
+                pat = await vscode.window.showInputBox({
+                    prompt: 'Paste your GitHub Personal Access Token',
+                    password: true,
+                    placeHolder: 'ghp_... or github_pat_...',
+                });
+                if (!pat) {
+                    return;
+                }
+            }
+
+            const cloneRepo = await vscode.window.showInputBox({
+                prompt: 'Repository to clone (or leave empty to skip)',
+                placeHolder: 'owner/repo',
+            });
+
+            let cloneDir: string | undefined;
+            if (cloneRepo) {
+                cloneDir = await vscode.window.showInputBox({
+                    prompt: 'Clone directory (or leave empty for default)',
+                    placeHolder: '/home/beams/my-project',
+                });
+            }
+
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Setting up GitHub on beam...', cancellable: false },
+                    async (progress) => {
+                        await setupGithubOnBeam({
+                            beamId,
+                            username,
+                            email: email || `${username}@users.noreply.github.com`,
+                            authMethod: authChoice.method,
+                            pat,
+                            cloneRepo: cloneRepo || undefined,
+                            cloneDir: cloneDir || undefined,
+                        }, progress);
+                    }
+                );
+
+                if (authChoice.method === 'oauth') {
+                    openOAuthTerminal(beamId);
+                    vscode.window.showInformationMessage('GitHub CLI installed and git configured. Complete OAuth login in the terminal.');
+                } else {
+                    vscode.window.showInformationMessage('GitHub setup complete on beam.');
+                }
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`GitHub setup failed: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('beams.run', async (item?: BeamItem) => {
+            const beamId = item?.beam?.id;
+            if (!beamId) {
+                vscode.window.showErrorMessage('Select a beam first.');
+                return;
+            }
+
+            const command = await vscode.window.showInputBox({
+                prompt: 'Command to run on the beam (must listen on port 8080)',
+                placeHolder: 'npm start / python3 -m http.server 8080 / go run .',
+            });
+            if (!command) {
+                return;
+            }
+
+            const terminal = vscode.window.createTerminal({
+                name: `Run: ${beamId}`,
+                shellPath: 'tsh',
+                shellArgs: ['beams', 'exec', beamId, '--', 'bash', '-c', command],
+                iconPath: new vscode.ThemeIcon('play'),
+            });
+            terminal.show();
+
+            try {
+                const url = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
+                    () => publishBeam(beamId)
+                );
+                const action = await vscode.window.showInformationMessage(
+                    `Beam running and published: ${url}`,
+                    'Open in Browser',
+                    'Copy URL',
+                    'Open in VS Code (Remote-SSH)'
+                );
+                if (action === 'Open in Browser') {
+                    vscode.env.openExternal(vscode.Uri.parse(url));
+                } else if (action === 'Copy URL') {
+                    await vscode.env.clipboard.writeText(url);
+                } else if (action === 'Open in VS Code (Remote-SSH)') {
+                    await vscode.commands.executeCommand('beams.connect', item);
+                }
+                provider.refresh();
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
 
         vscode.commands.registerCommand('beams.showActivityDetail', (item: { detail?: string; label?: string | vscode.TreeItemLabel }) => {
             if (!item?.detail) {

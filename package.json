@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onView:beamFileChanges", "onCommand:beams.connect"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -41,6 +41,10 @@
           "name": "Files"
         },
         {
+          "id": "beamFileChanges",
+          "name": "File Changes"
+        },
+        {
           "id": "beamActivity",
           "name": "Agent Activity"
         },
@@ -63,12 +67,16 @@
       { "command": "beams.connect", "title": "Open in VS Code (Remote-SSH)", "icon": "$(remote)", "category": "Beams" },
       { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.refreshFileChanges", "title": "Refresh File Changes", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.openChangeDiff", "title": "Open Diff", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
       { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
       { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
       { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" },
       { "command": "beams.setGithubPat", "title": "Set GitHub PAT", "icon": "$(code)", "category": "Beams" },
       { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" },
+      { "command": "beams.setupGithub", "title": "Setup GitHub on Beam", "icon": "$(mark-github)", "category": "Beams" },
+      { "command": "beams.run", "title": "Run on Beam", "icon": "$(play)", "category": "Beams" },
       { "command": "beams.showActivityDetail", "title": "Show Detail", "category": "Beams" }
     ],
     "menus": {
@@ -77,16 +85,19 @@
         { "command": "beams.setGithubPat", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
-        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
+        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" },
+        { "command": "beams.refreshFileChanges", "when": "view == beamFileChanges", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
+        { "command": "beams.run", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.ssh", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.openFiles", "when": "view == beamsList", "group": "1_connect" },
         { "command": "beams.publish", "when": "view == beamsList && viewItem == beam", "group": "2_actions" },
         { "command": "beams.unpublish", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
         { "command": "beams.copyUrl", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
         { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" }
       ]

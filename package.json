@@ -64,6 +64,7 @@
         { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
       ],
       "view/item/context": [
+        { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.ssh", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.openFiles", "when": "view == beamsList", "group": "1_connect" },
         { "command": "beams.publish", "when": "view == beamsList && viewItem == beam", "group": "2_actions" },

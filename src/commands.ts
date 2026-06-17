@@ -187,8 +187,6 @@ export function registerCommands(
                 try {
                     await setupGitCredentials(host, context.secrets);
                 } catch { /* non-fatal — beam may not have git yet */ }
-                fileExplorer.setBeam(item.beam);
-                activityProvider.setBeam(item.beam);
                 const config = vscode.workspace.getConfiguration('remote.SSH');
                 if (!config.get<boolean>('enableRemoteCommand')) {
                     await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);

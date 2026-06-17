@@ -58,12 +58,12 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
     private currentBeam: Beam | undefined;
     private session: AgentSession | undefined;
     private pollInterval: NodeJS.Timeout | undefined;
-    private transcriptPath: string | undefined;
+    private catCmd: string | undefined;
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
         this.session = undefined;
-        this.transcriptPath = undefined;
+        this.catCmd = undefined;
         this.startPolling();
         this._onDidChangeTreeData.fire(undefined);
     }
@@ -85,14 +85,13 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         if (!this.currentBeam) return;
 
         try {
-            if (!this.transcriptPath) {
-                this.transcriptPath = await this.findTranscript();
-                if (!this.transcriptPath) return;
+            if (!this.catCmd) {
+                this.catCmd = await this.findTranscripts();
+                if (!this.catCmd) return;
             }
 
-            // Use tail to get the last 200 lines of the transcript
             const output = await execOnBeam(this.currentBeam.id, [
-                'tail', '-n', '200', this.transcriptPath
+                'bash', '-c', this.catCmd
             ]);
 
             if (!output.trim()) return;
@@ -101,12 +100,11 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
             this.parseTranscript(lines);
             this._onDidChangeTreeData.fire(undefined);
         } catch {
-            // transcript might not exist yet, retry finding it next poll
-            this.transcriptPath = undefined;
+            this.catCmd = undefined;
         }
     }
 
-    private async findTranscript(): Promise<string | undefined> {
+    private async findTranscripts(): Promise<string | undefined> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
@@ -114,7 +112,9 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
             ]);
             const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
             if (files.length === 0) return undefined;
-            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
+            const dir = '/home/beams/.claude/projects/-home-beams';
+            const paths = files.map(f => `${dir}/${f}`).join(' ');
+            return `cat ${paths}`;
         } catch {
             return undefined;
         }
@@ -199,10 +199,10 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         }
 
         if (!this.session) {
-            const msg = this.transcriptPath
+            const msg = this.catCmd
                 ? 'Waiting for session data...'
                 : 'No agent session found on this beam';
-            return [new ActivityItem(msg, this.transcriptPath ? 'polling...' : undefined, this.transcriptPath ? 'loading~spin' : 'info')];
+            return [new ActivityItem(msg, this.catCmd ? 'polling...' : undefined, this.catCmd ? 'loading~spin' : 'info')];
         }
 
         if (element?.label === 'Tool Calls') {

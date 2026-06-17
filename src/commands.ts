@@ -5,7 +5,7 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
-import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat } from './github';
+import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat, setupGithubOnBeam, openOAuthTerminal } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
@@ -287,6 +287,93 @@ export function registerCommands(
         vscode.commands.registerCommand('beams.setGithubPat', () => promptAndStoreGithubPat(context.secrets)),
 
         vscode.commands.registerCommand('beams.clearGithubPat', () => clearGithubPat(context.secrets)),
+
+        vscode.commands.registerCommand('beams.setupGithub', async (item?: BeamItem) => {
+            const beamId = item?.beam?.id;
+            if (!beamId) {
+                vscode.window.showErrorMessage('Select a beam first.');
+                return;
+            }
+
+            const username = await vscode.window.showInputBox({
+                prompt: 'GitHub username',
+                placeHolder: 'octocat',
+            });
+            if (!username) {
+                return;
+            }
+
+            const email = await vscode.window.showInputBox({
+                prompt: 'Git email',
+                placeHolder: `${username}@users.noreply.github.com`,
+                value: `${username}@users.noreply.github.com`,
+            });
+            if (email === undefined) {
+                return;
+            }
+
+            const authChoice = await vscode.window.showQuickPick(
+                [
+                    { label: '$(globe) Full account access (OAuth)', description: 'Authenticate via browser — grants access to all your repos', method: 'oauth' as const },
+                    { label: '$(key) Fine-grained token (PAT)', description: 'Paste a token scoped to specific repos', method: 'pat' as const },
+                ],
+                { placeHolder: 'How would you like to authenticate with GitHub?' }
+            );
+            if (!authChoice) {
+                return;
+            }
+
+            let pat: string | undefined;
+            if (authChoice.method === 'pat') {
+                pat = await vscode.window.showInputBox({
+                    prompt: 'Paste your GitHub Personal Access Token',
+                    password: true,
+                    placeHolder: 'ghp_... or github_pat_...',
+                });
+                if (!pat) {
+                    return;
+                }
+            }
+
+            const cloneRepo = await vscode.window.showInputBox({
+                prompt: 'Repository to clone (or leave empty to skip)',
+                placeHolder: 'owner/repo',
+            });
+
+            let cloneDir: string | undefined;
+            if (cloneRepo) {
+                cloneDir = await vscode.window.showInputBox({
+                    prompt: 'Clone directory (or leave empty for default)',
+                    placeHolder: '/home/beams/my-project',
+                });
+            }
+
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Setting up GitHub on beam...', cancellable: false },
+                    async (progress) => {
+                        await setupGithubOnBeam({
+                            beamId,
+                            username,
+                            email: email || `${username}@users.noreply.github.com`,
+                            authMethod: authChoice.method,
+                            pat,
+                            cloneRepo: cloneRepo || undefined,
+                            cloneDir: cloneDir || undefined,
+                        }, progress);
+                    }
+                );
+
+                if (authChoice.method === 'oauth') {
+                    openOAuthTerminal(beamId);
+                    vscode.window.showInformationMessage('GitHub CLI installed and git configured. Complete OAuth login in the terminal.');
+                } else {
+                    vscode.window.showInformationMessage('GitHub setup complete on beam.');
+                }
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`GitHub setup failed: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
 
         vscode.commands.registerCommand('beams.showActivityDetail', (item: { detail?: string; label?: string | vscode.TreeItemLabel }) => {
             if (!item?.detail) {

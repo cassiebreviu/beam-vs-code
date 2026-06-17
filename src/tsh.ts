@@ -59,8 +59,8 @@ export async function unpublishBeam(id: string): Promise<void> {
     await runTsh(['beams', 'unpublish', id]);
 }
 
-export async function execOnBeam(id: string, command: string[]): Promise<string> {
-    const output = await runTsh(['beams', 'exec', id, '--', ...command]);
+export async function execOnBeam(id: string, command: string[], timeout?: number): Promise<string> {
+    const output = await runTsh(['beams', 'exec', id, '--', ...command], { timeout: timeout ?? 30000 });
     return output;
 }
 

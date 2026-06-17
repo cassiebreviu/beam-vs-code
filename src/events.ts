@@ -109,8 +109,8 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         for (const line of lines) {
             try {
                 const parsed = JSON.parse(line);
-                const event = this.toEvent(parsed);
-                if (event) events.push(event);
+                const lineEvents = this.toEvents(parsed);
+                events.push(...lineEvents);
             } catch {
                 continue;
             }
@@ -119,70 +119,114 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         return events.slice(-50);
     }
 
-    private toEvent(parsed: Record<string, unknown>): AgentEvent | null {
+    private toEvents(parsed: Record<string, unknown>): AgentEvent[] {
         const ts = parsed.timestamp
             ? new Date(parsed.timestamp as string).toLocaleTimeString()
             : '';
 
         const msg = parsed.message as Record<string, unknown> | undefined;
-        if (!msg) return null;
+        if (!msg) return [];
 
         const role = msg.role as string | undefined;
         const content = msg.content;
 
         if (role === 'user') {
             const text = extractText(content);
-            if (!text) return null;
-            return {
+            if (!text) return [];
+            return [{
                 timestamp: ts,
                 type: 'user',
                 summary: truncate(text, 80),
                 detail: text,
                 icon: 'account',
-            };
+            }];
         }
 
         if (role === 'assistant') {
-            if (!Array.isArray(content)) return null;
+            if (!Array.isArray(content)) return [];
+            const events: AgentEvent[] = [];
 
             for (const block of content) {
                 const b = block as Record<string, unknown>;
+
+                if (b.type === 'thinking') {
+                    const text = (b.thinking as string) ?? '';
+                    if (text.trim()) {
+                        events.push({
+                            timestamp: ts,
+                            type: 'thinking',
+                            summary: `Thinking: ${truncate(text, 70)}`,
+                            detail: text,
+                            icon: 'lightbulb',
+                        });
+                    }
+                }
+
                 if (b.type === 'tool_use') {
                     const name = (b.name as string) ?? 'tool';
                     const args = summarizeToolArgs(b.input);
-                    return {
+                    events.push({
                         timestamp: ts,
                         type: 'tool_use',
                         summary: `${name}${args ? ': ' + args : ''}`,
                         detail: JSON.stringify(b.input, null, 2),
                         icon: 'wrench',
-                    };
+                    });
                 }
+
                 if (b.type === 'text') {
                     const text = (b.text as string) ?? '';
-                    if (!text.trim()) continue;
-                    return {
-                        timestamp: ts,
-                        type: 'assistant',
-                        summary: truncate(text, 80),
-                        detail: text,
-                        icon: 'hubot',
-                    };
+                    if (text.trim()) {
+                        events.push({
+                            timestamp: ts,
+                            type: 'assistant',
+                            summary: truncate(text, 80),
+                            detail: text,
+                            icon: 'hubot',
+                        });
+                    }
                 }
             }
-            return null;
+
+            return events;
         }
 
-        if (parsed.type === 'tool_result' || (msg as Record<string, unknown>).type === 'tool_result') {
-            return {
+        // Tool results — detect errors and show output snippet
+        if (Array.isArray(content)) {
+            for (const block of content) {
+                const b = block as Record<string, unknown>;
+                if (b.type === 'tool_result') {
+                    const isError = b.is_error === true;
+                    const resultContent = b.content;
+                    const text = extractToolResultText(resultContent);
+                    const snippet = text ? truncate(text, 70) : '';
+                    return [{
+                        timestamp: ts,
+                        type: 'tool_result',
+                        summary: isError ? `Error: ${snippet || 'tool failed'}` : (snippet || 'Tool completed'),
+                        detail: text || undefined,
+                        icon: isError ? 'error' : 'check',
+                    }];
+                }
+            }
+        }
+
+        // Top-level tool_result (alternate format)
+        if (parsed.type === 'tool_result' || msg.type === 'tool_result') {
+            const isError = (msg.is_error === true) || (parsed.is_error === true);
+            const resultContent = msg.content ?? parsed.content;
+            const text = extractToolResultText(resultContent);
+            const snippet = text ? truncate(text, 70) : '';
+            return [{
                 timestamp: ts,
                 type: 'tool_result',
-                summary: 'Tool result received',
-                icon: 'check',
-            };
+                summary: isError ? `Error: ${snippet || 'tool failed'}` : (snippet || 'Tool completed'),
+                detail: text || undefined,
+                icon: isError ? 'error' : 'check',
+            }];
         }
 
-        return null;
+        return [];
     }
 
     getTreeItem(element: EventItem): vscode.TreeItem {
@@ -220,6 +264,20 @@ function extractText(content: unknown): string {
 function truncate(s: string, max: number): string {
     const line = s.split('\n')[0] ?? s;
     return line.length > max ? line.slice(0, max) + '...' : line;
+}
+
+function extractToolResultText(content: unknown): string {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content
+            .map((b: Record<string, unknown>) => {
+                if (b.type === 'text') return (b.text as string) ?? '';
+                return '';
+            })
+            .filter(Boolean)
+            .join('\n');
+    }
+    return '';
 }
 
 function summarizeToolArgs(input: unknown): string {

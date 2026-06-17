@@ -90,9 +90,8 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
                 if (!this.transcriptPath) return;
             }
 
-            // Use tail to get the last 200 lines of the transcript
             const output = await execOnBeam(this.currentBeam.id, [
-                'tail', '-n', '200', this.transcriptPath
+                'cat', this.transcriptPath
             ]);
 
             if (!output.trim()) return;

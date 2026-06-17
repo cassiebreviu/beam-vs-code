@@ -53,7 +53,8 @@
       { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
       { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" },
       { "command": "beams.setGithubPat", "title": "Set GitHub PAT", "icon": "$(code)", "category": "Beams" },
-      { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" }
+      { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" },
+      { "command": "beams.showActivityDetail", "title": "Show Detail", "category": "Beams" }
     ],
     "menus": {
       "view/title": [

@@ -15,6 +15,8 @@ interface AgentSession {
 interface ToolCall {
     tool: string;
     args?: string;
+    fullArgs?: unknown;
+    result?: string;
 }
 
 const COST_PER_MILLION: Record<string, [number, number, number, number]> = {
@@ -30,11 +32,21 @@ function estimateCost(model: string, tokensIn: number, cacheWrite: number, cache
 }
 
 class ActivityItem extends vscode.TreeItem {
-    constructor(label: string, description?: string, icon?: string, collapsible?: vscode.TreeItemCollapsibleState) {
+    public detail?: string;
+
+    constructor(label: string, description?: string, icon?: string, collapsible?: vscode.TreeItemCollapsibleState, detail?: string) {
         super(label, collapsible ?? vscode.TreeItemCollapsibleState.None);
         this.description = description;
+        this.detail = detail;
         if (icon) {
             this.iconPath = new vscode.ThemeIcon(icon);
+        }
+        if (detail) {
+            this.command = {
+                command: 'beams.showActivityDetail',
+                title: 'Show Detail',
+                arguments: [this],
+            };
         }
     }
 }
@@ -143,7 +155,19 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
                             toolCalls.push({
                                 tool: block.name ?? '?',
                                 args: summarizeArgs(block.input),
+                                fullArgs: block.input,
                             });
+                        }
+                        if (block.type === 'tool_result' && toolCalls.length > 0) {
+                            const text = typeof block.content === 'string'
+                                ? block.content
+                                : Array.isArray(block.content)
+                                    ? block.content.map((c: { text?: string }) => c.text ?? '').join('\n')
+                                    : '';
+                            const target = toolCalls.find(tc => !tc.result);
+                            if (target) {
+                                target.result = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
+                            }
                         }
                     }
                 }
@@ -182,16 +206,34 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         if (element?.label === 'Tool Calls') {
             return this.session.toolCalls.slice().reverse().map(tc => {
                 const desc = tc.args ? `${tc.args}` : '';
-                return new ActivityItem(tc.tool, desc, 'wrench');
+                const detail = formatToolDetail(tc);
+                return new ActivityItem(tc.tool, desc, 'wrench', undefined, detail);
             });
         }
 
         const s = this.session;
+        const tokenDetail = [
+            `Input tokens: ${s.tokensIn.toLocaleString()}`,
+            `Output tokens: ${s.tokensOut.toLocaleString()}`,
+            `Cache read: ${s.cacheRead.toLocaleString()}`,
+            `Cache write: ${s.cacheWrite.toLocaleString()}`,
+            `Total: ${(s.tokensIn + s.tokensOut + s.cacheRead + s.cacheWrite).toLocaleString()}`,
+        ].join('\n');
+        const costDetail = [
+            `Model: ${s.model}`,
+            `Estimated cost: $${s.costUsd.toFixed(4)}`,
+            '',
+            `Breakdown:`,
+            `  Input: ${s.tokensIn.toLocaleString()} tokens`,
+            `  Output: ${s.tokensOut.toLocaleString()} tokens`,
+            `  Cache read: ${s.cacheRead.toLocaleString()} tokens`,
+            `  Cache write: ${s.cacheWrite.toLocaleString()} tokens`,
+        ].join('\n');
         const items: ActivityItem[] = [
-            new ActivityItem('Model', s.model, 'hubot'),
-            new ActivityItem('Tokens In', `${formatNumber(s.tokensIn)} (${formatNumber(s.cacheRead)} cached)`, 'arrow-down'),
-            new ActivityItem('Tokens Out', formatNumber(s.tokensOut), 'arrow-up'),
-            new ActivityItem('Cost', `$${s.costUsd.toFixed(4)}`, 'credit-card'),
+            new ActivityItem('Model', s.model, 'hubot', undefined, `Model: ${s.model}`),
+            new ActivityItem('Tokens In', `${formatNumber(s.tokensIn)} (${formatNumber(s.cacheRead)} cached)`, 'arrow-down', undefined, tokenDetail),
+            new ActivityItem('Tokens Out', formatNumber(s.tokensOut), 'arrow-up', undefined, tokenDetail),
+            new ActivityItem('Cost', `$${s.costUsd.toFixed(4)}`, 'credit-card', undefined, costDetail),
             new ActivityItem('Messages', `${s.messages}`, 'comment'),
             new ActivityItem(
                 'Tool Calls',
@@ -209,6 +251,17 @@ function formatNumber(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
     return `${n}`;
+}
+
+function formatToolDetail(tc: ToolCall): string {
+    const parts: string[] = [`Tool: ${tc.tool}`];
+    if (tc.fullArgs) {
+        parts.push('', 'Arguments:', JSON.stringify(tc.fullArgs, null, 2));
+    }
+    if (tc.result) {
+        parts.push('', 'Result:', tc.result);
+    }
+    return parts.join('\n');
 }
 
 function summarizeArgs(input: unknown): string {

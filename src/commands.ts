@@ -278,6 +278,19 @@ export function registerCommands(
 
         vscode.commands.registerCommand('beams.clearGithubPat', () => clearGithubPat(context.secrets)),
 
+        vscode.commands.registerCommand('beams.showActivityDetail', (item: { detail?: string; label?: string | vscode.TreeItemLabel }) => {
+            if (!item?.detail) {
+                return;
+            }
+            const channel = vscode.window.createOutputChannel('Beam Activity Detail');
+            channel.clear();
+            const title = typeof item.label === 'string' ? item.label : item.label?.label ?? 'Detail';
+            channel.appendLine(`═══ ${title} ═══`);
+            channel.appendLine('');
+            channel.appendLine(item.detail);
+            channel.show(true);
+        }),
+
         vscode.commands.registerCommand('beams.export', async (item: BeamItem) => {
             if (!item?.beam) {
                 return;

@@ -17,8 +17,8 @@ export class BeamItem extends vscode.TreeItem {
         this.iconPath = new vscode.ThemeIcon(beam.url ? 'globe' : 'vm');
 
         this.command = {
-            command: 'beams.connect',
-            title: 'Connect to Beam',
+            command: 'beams.select',
+            title: 'Select Beam',
             arguments: [this],
         };
     }

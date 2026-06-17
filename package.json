@@ -4,11 +4,17 @@
   "description": "Manage and connect to Teleport Beams from VS Code",
   "version": "0.1.0",
   "publisher": "teleport",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cassiebreviu/beam-vs-code"
+  },
+  "icon": "resources/beam-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamsList"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -23,22 +29,29 @@
     "views": {
       "teleport-beams": [
         {
+          "id": "beamClusters",
+          "name": "Clusters"
+        },
+        {
           "id": "beamsList",
           "name": "Beams"
         },
         {
           "id": "beamFiles",
-          "name": "Files",
-          "when": "beams.fileExplorerActive"
+          "name": "Files"
         },
         {
           "id": "beamActivity",
-          "name": "Agent Activity",
-          "when": "beams.fileExplorerActive"
+          "name": "Agent Activity"
+        },
+        {
+          "id": "beamEvents",
+          "name": "Agent Events"
         }
       ]
     },
     "commands": [
+      { "command": "beams.select", "title": "Select Beam", "category": "Beams" },
       { "command": "beams.refresh", "title": "Refresh", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.create", "title": "Create Beam", "icon": "$(add)", "category": "Beams" },
       { "command": "beams.delete", "title": "Delete Beam", "icon": "$(trash)", "category": "Beams" },
@@ -47,22 +60,27 @@
       { "command": "beams.publish", "title": "Publish Beam", "icon": "$(globe)", "category": "Beams" },
       { "command": "beams.unpublish", "title": "Unpublish Beam", "category": "Beams" },
       { "command": "beams.copyUrl", "title": "Copy URL", "category": "Beams" },
-      { "command": "beams.connect", "title": "Connect to Beam", "category": "Beams" },
+      { "command": "beams.connect", "title": "Open in VS Code (Remote-SSH)", "icon": "$(remote)", "category": "Beams" },
       { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
       { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
       { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
-      { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" }
+      { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" },
+      { "command": "beams.setGithubPat", "title": "Set GitHub PAT", "icon": "$(code)", "category": "Beams" },
+      { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" },
+      { "command": "beams.showActivityDetail", "title": "Show Detail", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
         { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
+        { "command": "beams.setGithubPat", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
       ],
       "view/item/context": [
+        { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.ssh", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.openFiles", "when": "view == beamsList", "group": "1_connect" },
         { "command": "beams.publish", "when": "view == beamsList && viewItem == beam", "group": "2_actions" },
@@ -72,17 +90,30 @@
         { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" }
       ]
+    },
+    "configuration": {
+      "title": "Beams",
+      "properties": {
+        "beams.github.username": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub username for automatic credential setup on new beams"
+        }
+      }
     }
   },
   "scripts": {
     "dev": "tsc -watch -p ./",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "prepackage": "npm run compile",
+    "package": "vsce package --no-dependencies",
+    "install-local": "code --install-extension teleport-beams-0.1.0.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
     "typescript": "^5.3.0"
   }
 }

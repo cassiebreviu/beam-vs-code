@@ -6,6 +6,7 @@ export interface BeamTemplate {
     label: string;
     description: string;
     commands: string[];
+    claudeContext?: Record<string, string>;
     custom?: boolean;
 }
 
@@ -47,8 +48,18 @@ export async function saveCustomTemplate(template: BeamTemplate): Promise<void> 
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
-    const custom = getCustomTemplates().map(({ label, description, commands }) => ({ label, description, commands }));
-    custom.push({ label: template.label, description: template.description, commands: template.commands });
+    const custom = getCustomTemplates().map(({ label, description, commands, claudeContext }) => {
+        const entry: { label: string; description: string; commands: string[]; claudeContext?: Record<string, string> } = { label, description, commands };
+        if (claudeContext) entry.claudeContext = claudeContext;
+        return entry;
+    });
+    const entry: { label: string; description: string; commands: string[]; claudeContext?: Record<string, string> } = {
+        label: template.label,
+        description: template.description,
+        commands: template.commands,
+    };
+    if (template.claudeContext) entry.claudeContext = template.claudeContext;
+    custom.push(entry);
     fs.writeFileSync(filePath, JSON.stringify(custom, null, 2), 'utf-8');
 }
 

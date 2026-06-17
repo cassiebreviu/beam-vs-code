@@ -73,6 +73,9 @@ export function registerCommands(
                                 await execOnBeam(b.id, ['bash', '-c', cmd]);
                             }
                         }
+                        if (picked.template.claudeContext) {
+                            await writeClaudeContext(b.id, picked.template.claudeContext);
+                        }
                         try {
                             const status = await checkStatus();
                             if (status.loggedIn && status.cluster) {
@@ -140,8 +143,28 @@ export function registerCommands(
                 commands = commandsInput.split(';').map(c => c.trim()).filter(Boolean);
             }
 
-            await saveCustomTemplate({ label: name, description: description || '', commands });
-            vscode.window.showInformationMessage(`Template "${name}" saved.`);
+            const saveContext = await vscode.window.showQuickPick(
+                [
+                    { label: 'Yes', description: 'Save CLAUDE.md and memory files from this beam' },
+                    { label: 'No', description: 'Template without Claude context' },
+                ],
+                { placeHolder: 'Include Claude session context (CLAUDE.md + memory)?' }
+            );
+
+            let claudeContext: Record<string, string> | undefined;
+            if (saveContext?.label === 'Yes') {
+                claudeContext = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Capturing Claude context...' },
+                    () => captureClaudeContext(item.beam.id)
+                );
+                if (Object.keys(claudeContext).length === 0) {
+                    claudeContext = undefined;
+                }
+            }
+
+            await saveCustomTemplate({ label: name, description: description || '', commands, claudeContext });
+            const fileCount = claudeContext ? ` (${Object.keys(claudeContext).length} context files)` : '';
+            vscode.window.showInformationMessage(`Template "${name}" saved${fileCount}.`);
         }),
 
         vscode.commands.registerCommand('beams.deleteTemplate', async () => {
@@ -386,4 +409,52 @@ async function captureBeamConfig(beamId: string): Promise<string[]> {
     } catch { /* no apt */ }
 
     return commands;
+}
+
+async function captureClaudeContext(beamId: string): Promise<Record<string, string>> {
+    const context: Record<string, string> = {};
+    const baseDir = '/home/beams/.claude';
+
+    try {
+        const files = await execOnBeam(beamId, [
+            'bash', '-c',
+            `find ${baseDir} -type f \\( -name "*.md" -o -name "*.json" \\) ! -path "*/projects/*" ! -path "*/worktrees/*" 2>/dev/null || true`
+        ]);
+
+        for (const filePath of files.trim().split('\n').filter(Boolean)) {
+            try {
+                const content = await execOnBeam(beamId, ['cat', filePath]);
+                const relPath = filePath.slice(baseDir.length + 1);
+                context[relPath] = content;
+            } catch { /* skip unreadable files */ }
+        }
+    } catch { /* .claude dir may not exist */ }
+
+    // Also grab project-level CLAUDE.md
+    try {
+        const claudeMd = await execOnBeam(beamId, ['cat', '/home/beams/CLAUDE.md']);
+        if (claudeMd.trim()) {
+            context['../CLAUDE.md'] = claudeMd;
+        }
+    } catch { /* no project CLAUDE.md */ }
+
+    return context;
+}
+
+async function writeClaudeContext(beamId: string, context: Record<string, string>): Promise<void> {
+    const baseDir = '/home/beams/.claude';
+
+    for (const [relPath, content] of Object.entries(context)) {
+        try {
+            let fullPath: string;
+            if (relPath === '../CLAUDE.md') {
+                fullPath = '/home/beams/CLAUDE.md';
+            } else {
+                fullPath = `${baseDir}/${relPath}`;
+            }
+            const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+            await execOnBeam(beamId, ['mkdir', '-p', dir]);
+            await execOnBeam(beamId, ['bash', '-c', `cat > ${fullPath} << 'BEAMTEMPLATEEOF'\n${content}\nBEAMTEMPLATEEOF`]);
+        } catch { /* skip on write failure */ }
+    }
 }

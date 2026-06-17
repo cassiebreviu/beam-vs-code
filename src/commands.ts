@@ -50,7 +50,7 @@ export function registerCommands(
         }),
 
         vscode.commands.registerCommand('beams.create', async () => {
-            const allTemplates = getAllTemplates(context);
+            const allTemplates = getAllTemplates();
             const picked = await vscode.window.showQuickPick(
                 allTemplates.map(t => ({
                     label: t.custom ? `$(star) ${t.label}` : t.label,
@@ -140,12 +140,12 @@ export function registerCommands(
                 commands = commandsInput.split(';').map(c => c.trim()).filter(Boolean);
             }
 
-            await saveCustomTemplate(context, { label: name, description: description || '', commands });
+            await saveCustomTemplate({ label: name, description: description || '', commands });
             vscode.window.showInformationMessage(`Template "${name}" saved.`);
         }),
 
         vscode.commands.registerCommand('beams.deleteTemplate', async () => {
-            const custom = getCustomTemplates(context);
+            const custom = getCustomTemplates();
             if (custom.length === 0) {
                 vscode.window.showInformationMessage('No custom templates to delete.');
                 return;
@@ -159,7 +159,7 @@ export function registerCommands(
                 return;
             }
 
-            await deleteCustomTemplate(context, picked.label);
+            await deleteCustomTemplate(picked.label);
             vscode.window.showInformationMessage(`Template "${picked.label}" deleted.`);
         }),
 

@@ -1,4 +1,6 @@
-import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export interface BeamTemplate {
     label: string;
@@ -15,31 +17,49 @@ export const builtinTemplates: BeamTemplate[] = [
     },
 ];
 
-const CUSTOM_TEMPLATES_KEY = 'beams.customTemplates';
-
-export function getCustomTemplates(context: vscode.ExtensionContext): BeamTemplate[] {
-    return context.globalState.get<BeamTemplate[]>(CUSTOM_TEMPLATES_KEY) ?? [];
+function getTemplatesPath(): string {
+    return path.join(os.homedir(), '.teleport', 'beams', 'templates.json');
 }
 
-export function getAllTemplates(context: vscode.ExtensionContext): BeamTemplate[] {
-    const custom = getCustomTemplates(context);
+export function getCustomTemplates(): BeamTemplate[] {
+    const filePath = getTemplatesPath();
+    if (!fs.existsSync(filePath)) {
+        return [];
+    }
+    try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const templates = JSON.parse(content);
+        if (!Array.isArray(templates)) return [];
+        return templates.map((t: BeamTemplate) => ({ ...t, custom: true }));
+    } catch {
+        return [];
+    }
+}
+
+export function getAllTemplates(): BeamTemplate[] {
+    const custom = getCustomTemplates();
     return [...custom, ...builtinTemplates];
 }
 
-export async function saveCustomTemplate(
-    context: vscode.ExtensionContext,
-    template: BeamTemplate
-): Promise<void> {
-    const custom = getCustomTemplates(context);
-    custom.push({ ...template, custom: true });
-    await context.globalState.update(CUSTOM_TEMPLATES_KEY, custom);
+export async function saveCustomTemplate(template: BeamTemplate): Promise<void> {
+    const filePath = getTemplatesPath();
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const custom = getCustomTemplates().map(({ label, description, commands }) => ({ label, description, commands }));
+    custom.push({ label: template.label, description: template.description, commands: template.commands });
+    fs.writeFileSync(filePath, JSON.stringify(custom, null, 2), 'utf-8');
 }
 
-export async function deleteCustomTemplate(
-    context: vscode.ExtensionContext,
-    label: string
-): Promise<void> {
-    const custom = getCustomTemplates(context);
-    const filtered = custom.filter(t => t.label !== label);
-    await context.globalState.update(CUSTOM_TEMPLATES_KEY, filtered);
+export async function deleteCustomTemplate(label: string): Promise<void> {
+    const filePath = getTemplatesPath();
+    const custom = getCustomTemplates()
+        .filter(t => t.label !== label)
+        .map(({ label, description, commands }) => ({ label, description, commands }));
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, JSON.stringify(custom, null, 2), 'utf-8');
 }

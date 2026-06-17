@@ -271,13 +271,13 @@ export function registerCommands(
             fileChangesProvider.refresh();
         }),
 
-        vscode.commands.registerCommand('beams.openChangeDiff', async (change: { beamId: string; path: string }) => {
+        vscode.commands.registerCommand('beams.openChangeDiff', async (change: { beamId: string; path: string; repoPath: string }) => {
             if (!change) {
                 return;
             }
             try {
                 const headUri = vscode.Uri.parse(`beam://${change.beamId}/.git-diff-head/${change.path}`);
-                const workUri = vscode.Uri.parse(`beam://${change.beamId}/home/beams/${change.path}`);
+                const workUri = vscode.Uri.parse(`beam://${change.beamId}${change.repoPath}/${change.path}`);
 
                 const filename = change.path.split('/').pop() ?? change.path;
                 await vscode.commands.executeCommand('vscode.diff', headUri, workUri, `${filename} (HEAD ↔ Working)`);

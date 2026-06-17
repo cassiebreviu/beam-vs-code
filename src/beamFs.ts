@@ -60,8 +60,9 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
             const GIT_HEAD_PREFIX = '/.git-diff-head/';
             if (remotePath.startsWith(GIT_HEAD_PREFIX)) {
                 const filePath = remotePath.slice(GIT_HEAD_PREFIX.length);
+                const repoPath = await this.findRepoFor(beamId, filePath);
                 const output = await execOnBeam(beamId, [
-                    'bash', '-c', `cd /home/beams && git show HEAD:"${filePath}" 2>/dev/null || true`
+                    'bash', '-c', `cd "${repoPath}" && git show HEAD:"${filePath}" 2>/dev/null || true`
                 ]);
                 return Buffer.from(output);
             }
@@ -104,6 +105,17 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
     async createDirectory(uri: vscode.Uri): Promise<void> {
         const { beamId, remotePath } = this.parseUri(uri);
         await execOnBeam(beamId, ['mkdir', '-p', remotePath]);
+    }
+
+    private async findRepoFor(beamId: string, _filePath: string): Promise<string> {
+        try {
+            const output = await execOnBeam(beamId, [
+                'bash', '-c', 'find /home/beams -maxdepth 3 -name ".git" -type d 2>/dev/null | head -1 | xargs dirname'
+            ]);
+            return output.trim() || '/home/beams';
+        } catch {
+            return '/home/beams';
+        }
     }
 
     private parseUri(uri: vscode.Uri): { beamId: string; remotePath: string } {

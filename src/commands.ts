@@ -9,6 +9,7 @@ import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat, setupGith
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
+import { FileChangesProvider } from './fileChanges';
 import * as path from 'path';
 
 export function registerCommands(
@@ -16,7 +17,8 @@ export function registerCommands(
     provider: BeamsProvider,
     fileExplorer: BeamFileExplorer,
     activityProvider: AgentActivityProvider,
-    eventsProvider: AgentEventsProvider
+    eventsProvider: AgentEventsProvider,
+    fileChangesProvider: FileChangesProvider
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('beams.select', (item: BeamItem) => {
@@ -26,6 +28,7 @@ export function registerCommands(
             fileExplorer.setBeam(item.beam);
             activityProvider.setBeam(item.beam);
             eventsProvider.setBeam(item.beam);
+            fileChangesProvider.setBeam(item.beam);
         }),
 
         vscode.commands.registerCommand('beams.refresh', () => {
@@ -239,6 +242,25 @@ export function registerCommands(
 
         vscode.commands.registerCommand('beams.refreshFiles', () => {
             fileExplorer.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.refreshFileChanges', () => {
+            fileChangesProvider.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.openChangeDiff', async (change: { beamId: string; path: string }) => {
+            if (!change) {
+                return;
+            }
+            try {
+                const headUri = vscode.Uri.parse(`beam://${change.beamId}/.git-diff-head/${change.path}`);
+                const workUri = vscode.Uri.parse(`beam://${change.beamId}/home/beams/${change.path}`);
+
+                const filename = change.path.split('/').pop() ?? change.path;
+                await vscode.commands.executeCommand('vscode.diff', headUri, workUri, `${filename} (HEAD ↔ Working)`);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to open diff: ${err instanceof Error ? err.message : err}`);
+            }
         }),
 
         vscode.commands.registerCommand('beams.publish', async (item: BeamItem) => {

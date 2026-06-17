@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onView:beamFileChanges", "onCommand:beams.connect"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -41,6 +41,10 @@
           "name": "Files"
         },
         {
+          "id": "beamFileChanges",
+          "name": "File Changes"
+        },
+        {
           "id": "beamActivity",
           "name": "Agent Activity"
         },
@@ -63,6 +67,8 @@
       { "command": "beams.connect", "title": "Open in VS Code (Remote-SSH)", "icon": "$(remote)", "category": "Beams" },
       { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.refreshFileChanges", "title": "Refresh File Changes", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.openChangeDiff", "title": "Open Diff", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
       { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
       { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
@@ -78,7 +84,8 @@
         { "command": "beams.setGithubPat", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
-        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
+        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" },
+        { "command": "beams.refreshFileChanges", "when": "view == beamFileChanges", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },

@@ -70,7 +70,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
                 'tail', '-n', '100', this.transcriptPath
             ]);
 
-            if (!output.trim()) return;
+            if (!output.trim()) {
+                if (this.events.length > 0) {
+                    this.events = [];
+                    this._onDidChangeTreeData.fire(undefined);
+                }
+                return;
+            }
 
             const lines = output.split('\n').filter(l => l.trim());
             if (lines.length === this.lastLineCount) return;
@@ -87,11 +93,12 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
-                'ls', '-t', '/home/beams/.claude/projects/-home-beams/'
+                'bash', '-c', 'ls -t /home/beams/.claude/projects/-home-beams/*.jsonl 2>/dev/null || find /home/beams/.claude -name "*.jsonl" -type f 2>/dev/null | head -5'
             ]);
             const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
             if (files.length === 0) return undefined;
-            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
+            const first = files[0];
+            return first.startsWith('/') ? first : `/home/beams/.claude/projects/-home-beams/${first}`;
         } catch {
             return undefined;
         }
@@ -189,7 +196,11 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         }
 
         if (this.events.length === 0) {
-            return [new EventItem({ timestamp: '', type: 'info', summary: 'Waiting for events...', icon: 'loading~spin' })];
+            const msg = this.transcriptPath
+                ? 'Waiting for events...'
+                : 'No agent session found on this beam';
+            const icon = this.transcriptPath ? 'loading~spin' : 'info';
+            return [new EventItem({ timestamp: '', type: 'info', summary: msg, icon })];
         }
 
         return this.events.slice().reverse().map(e => new EventItem(e));

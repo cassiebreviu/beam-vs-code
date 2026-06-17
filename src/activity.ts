@@ -109,13 +109,13 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
     private async findTranscript(): Promise<string | undefined> {
         if (!this.currentBeam) return undefined;
         try {
-            // List jsonl files and pick the most recent by name (UUIDs sort by creation)
             const output = await execOnBeam(this.currentBeam.id, [
-                'ls', '-t', '/home/beams/.claude/projects/-home-beams/'
+                'bash', '-c', 'ls -t /home/beams/.claude/projects/-home-beams/*.jsonl 2>/dev/null || find /home/beams/.claude -name "*.jsonl" -type f 2>/dev/null | head -5'
             ]);
             const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
             if (files.length === 0) return undefined;
-            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
+            const first = files[0];
+            return first.startsWith('/') ? first : `/home/beams/.claude/projects/-home-beams/${first}`;
         } catch {
             return undefined;
         }
@@ -200,7 +200,10 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         }
 
         if (!this.session) {
-            return [new ActivityItem('No active session detected', 'polling...', 'loading~spin')];
+            const msg = this.transcriptPath
+                ? 'Waiting for session data...'
+                : 'No agent session found on this beam';
+            return [new ActivityItem(msg, this.transcriptPath ? 'polling...' : undefined, this.transcriptPath ? 'loading~spin' : 'info')];
         }
 
         if (element?.label === 'Tool Calls') {

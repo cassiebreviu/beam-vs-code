@@ -122,6 +122,23 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
         return host;
     }
 
+    // Migrate stale .beams.sh entry to .beams.run if present
+    if (rawCluster !== cluster) {
+        const staleHost = `vscode+${beamId}.${rawCluster}`;
+        if (config.includes(`Host ${staleHost}`)) {
+            config = config.replace(
+                new RegExp(`Host ${staleHost.replace(/\./g, '\\.')}`, 'g'),
+                `Host ${host}`
+            );
+            config = config.replace(
+                new RegExp(`HostName ${beamId}\\.${rawCluster.replace(/\./g, '\\.')}`, 'g'),
+                `HostName ${beamId}.${cluster}`
+            );
+            writeSshConfig(config);
+            return host;
+        }
+    }
+
     // If there's an existing tsh-generated block for this cluster, patch its ProxyCommand
     // Also check for the .beams.sh variant since tsh config may have generated that
     const rawClusterPattern = rawCluster !== cluster ? `*.${rawCluster}` : null;

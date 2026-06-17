@@ -4,6 +4,12 @@
   "description": "Manage and connect to Teleport Beams from VS Code",
   "version": "0.1.0",
   "publisher": "teleport",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cassiebreviu/beam-vs-code"
+  },
+  "icon": "resources/beam-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -96,11 +102,14 @@
     "dev": "tsc -watch -p ./",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "prepackage": "npm run compile",
+    "package": "vsce package --no-dependencies",
+    "install-local": "code --install-extension teleport-beams-0.1.0.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
     "typescript": "^5.3.0"
   }
 }

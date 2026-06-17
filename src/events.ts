@@ -32,13 +32,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
     private currentBeam: Beam | undefined;
     private events: AgentEvent[] = [];
     private pollInterval: NodeJS.Timeout | undefined;
-    private catCmd: string | undefined;
+    private transcriptPath: string | undefined;
     private lastContent = '';
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
         this.events = [];
-        this.catCmd = undefined;
+        this.transcriptPath = undefined;
         this.lastContent = '';
         this.startPolling();
         this._onDidChangeTreeData.fire(undefined);
@@ -61,13 +61,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         if (!this.currentBeam) return;
 
         try {
-            if (!this.catCmd) {
-                this.catCmd = await this.buildCatCmd();
-                if (!this.catCmd) return;
+            if (!this.transcriptPath) {
+                this.transcriptPath = await this.findTranscript();
+                if (!this.transcriptPath) return;
             }
 
             const output = await execOnBeam(this.currentBeam.id, [
-                'bash', '-c', `${this.catCmd} | tail -n 100`
+                'tail', '-n', '100', this.transcriptPath
             ]);
 
             if (!output.trim()) {
@@ -85,11 +85,11 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
             this.events = this.parseEvents(lines);
             this._onDidChangeTreeData.fire(undefined);
         } catch {
-            this.catCmd = undefined;
+            this.transcriptPath = undefined;
         }
     }
 
-    private async buildCatCmd(): Promise<string | undefined> {
+    private async findTranscript(): Promise<string | undefined> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
@@ -97,8 +97,7 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
             ]);
             const files = output.trim().split('\n').filter(f => f.endsWith('.jsonl'));
             if (files.length === 0) return undefined;
-            const dir = '/home/beams/.claude/projects/-home-beams';
-            return `cat ${files.map(f => `${dir}/${f}`).join(' ')}`;
+            return `/home/beams/.claude/projects/-home-beams/${files[0]}`;
         } catch {
             return undefined;
         }
@@ -196,10 +195,10 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         }
 
         if (this.events.length === 0) {
-            const msg = this.catCmd
+            const msg = this.transcriptPath
                 ? 'Waiting for events...'
                 : 'No agent session found on this beam';
-            const icon = this.catCmd ? 'loading~spin' : 'info';
+            const icon = this.transcriptPath ? 'loading~spin' : 'info';
             return [new EventItem({ timestamp: '', type: 'info', summary: msg, icon })];
         }
 

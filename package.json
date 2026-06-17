@@ -8,7 +8,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamsList"],
+  "activationEvents": ["onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onCommand:beams.connect"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -28,13 +28,11 @@
         },
         {
           "id": "beamFiles",
-          "name": "Files",
-          "when": "beams.fileExplorerActive"
+          "name": "Files"
         },
         {
           "id": "beamActivity",
-          "name": "Agent Activity",
-          "when": "beams.fileExplorerActive"
+          "name": "Agent Activity"
         }
       ]
     },

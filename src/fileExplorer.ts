@@ -42,7 +42,6 @@ export class BeamFileExplorer implements vscode.TreeDataProvider<FileItem> {
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
-        vscode.commands.executeCommand('setContext', 'beams.fileExplorerActive', true);
         this._onDidChangeTreeData.fire(undefined);
     }
 

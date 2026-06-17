@@ -98,17 +98,16 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
 
     return [
         MARKER_START,
-        `Host ${beamHost}`,
-        `    HostName ${beamId}.${cluster}`,
-        '    User beams',
-        '    StrictHostKeyChecking no',
-        '    UserKnownHostsFile /dev/null',
-        `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
-        '',
         `Host ${wildcardHost} !${cluster}`,
         '    StrictHostKeyChecking no',
         '    UserKnownHostsFile /dev/null',
         `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+        '',
+        `Host ${beamHost}`,
+        `    HostName ${beamId}.${cluster}`,
+        '    User beams',
+        '    UserKnownHostsFile /dev/null',
+        '    RemoteCommand bash',
         MARKER_END,
     ].join('\n');
 }
@@ -145,16 +144,14 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
     const rawClusterPattern = rawCluster !== cluster ? `*.${rawCluster}` : null;
     if ((config.includes(`*.${cluster}`) || (rawClusterPattern && config.includes(rawClusterPattern))) && !config.includes(MARKER_START)) {
         config = patchTshConfigForBeams(config, cluster);
-        const tshPath = getTshPath();
         const beamEntry = [
             '',
             MARKER_START,
             `Host ${host}`,
             `    HostName ${beamId}.${cluster}`,
             '    User beams',
-            '    StrictHostKeyChecking no',
             '    UserKnownHostsFile /dev/null',
-            `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+            '    RemoteCommand bash',
             MARKER_END,
         ].join('\n');
         // Insert beam entry BEFORE the wildcard so it matches first
@@ -172,7 +169,6 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
     }
 
     // No existing tsh config — try to generate it
-    const tshPath = getTshPath();
     if (!config.includes(MARKER_START)) {
         const tshConfig = await getTshConfig();
         if (tshConfig) {
@@ -182,9 +178,8 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
                 `Host ${host}`,
                 `    HostName ${beamId}.${cluster}`,
                 '    User beams',
-                '    StrictHostKeyChecking no',
                 '    UserKnownHostsFile /dev/null',
-                `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+                '    RemoteCommand bash',
                 '',
                 patched,
                 MARKER_END,
@@ -198,7 +193,7 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
         }
     }
 
-    // Fallback: add entry to existing beams block
+    // Fallback: write standalone block (no tsh config available)
     const markerIdx = config.indexOf(MARKER_START);
     if (markerIdx !== -1) {
         const endIdx = config.indexOf(MARKER_END);
@@ -210,9 +205,8 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
                 `Host ${host}`,
                 `    HostName ${beamId}.${cluster}`,
                 '    User beams',
-                '    StrictHostKeyChecking no',
                 '    UserKnownHostsFile /dev/null',
-                `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+                '    RemoteCommand bash',
             ].join('\n');
             config = before + newEntry + '\n' + after;
             writeSshConfig(config);

@@ -16,5 +16,10 @@ export class BeamItem extends vscode.TreeItem {
         this.contextValue = beam.url ? 'beamPublished' : 'beam';
         this.iconPath = new vscode.ThemeIcon(beam.url ? 'globe' : 'vm');
 
+        this.command = {
+            command: 'beams.select',
+            title: 'Select Beam',
+            arguments: [this],
+        };
     }
 }

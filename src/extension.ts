@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { BeamItem } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
@@ -13,18 +12,9 @@ export function activate(context: vscode.ExtensionContext): void {
     const activityProvider = new AgentActivityProvider();
     const eventsProvider = new AgentEventsProvider();
 
-    const beamsTree = vscode.window.createTreeView<BeamItem>('beamsList', {
+    vscode.window.createTreeView('beamsList', {
         treeDataProvider: provider,
         showCollapseAll: false,
-    });
-
-    beamsTree.onDidChangeSelection(e => {
-        const selected = e.selection[0];
-        if (selected) {
-            fileExplorer.setBeam(selected.beam);
-            activityProvider.setBeam(selected.beam);
-            eventsProvider.setBeam(selected.beam);
-        }
     });
 
     vscode.window.createTreeView('beamFiles', {
@@ -49,7 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, activityProvider);
+    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider);
 
     context.subscriptions.push({ dispose: () => provider.dispose() });
     context.subscriptions.push({ dispose: () => activityProvider.stop() });

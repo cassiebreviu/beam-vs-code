@@ -41,6 +41,7 @@
       ]
     },
     "commands": [
+      { "command": "beams.select", "title": "Select Beam", "category": "Beams" },
       { "command": "beams.refresh", "title": "Refresh", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.create", "title": "Create Beam", "icon": "$(add)", "category": "Beams" },
       { "command": "beams.delete", "title": "Delete Beam", "icon": "$(trash)", "category": "Beams" },

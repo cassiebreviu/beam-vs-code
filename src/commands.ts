@@ -8,15 +8,26 @@ import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTem
 import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
+import { AgentEventsProvider } from './events';
 import * as path from 'path';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
     provider: BeamsProvider,
     fileExplorer: BeamFileExplorer,
-    activityProvider: AgentActivityProvider
+    activityProvider: AgentActivityProvider,
+    eventsProvider: AgentEventsProvider
 ): void {
     context.subscriptions.push(
+        vscode.commands.registerCommand('beams.select', (item: BeamItem) => {
+            if (!item?.beam) {
+                return;
+            }
+            fileExplorer.setBeam(item.beam);
+            activityProvider.setBeam(item.beam);
+            eventsProvider.setBeam(item.beam);
+        }),
+
         vscode.commands.registerCommand('beams.refresh', () => {
             provider.refresh();
         }),
@@ -210,7 +221,6 @@ export function registerCommands(
                 return;
             }
             fileExplorer.setBeam(item.beam);
-            activityProvider.setBeam(item.beam);
             vscode.commands.executeCommand('beamFiles.focus');
         }),
 

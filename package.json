@@ -76,6 +76,7 @@
       { "command": "beams.setGithubPat", "title": "Set GitHub PAT", "icon": "$(code)", "category": "Beams" },
       { "command": "beams.clearGithubPat", "title": "Clear GitHub PAT", "category": "Beams" },
       { "command": "beams.setupGithub", "title": "Setup GitHub on Beam", "icon": "$(mark-github)", "category": "Beams" },
+      { "command": "beams.run", "title": "Run on Beam", "icon": "$(play)", "category": "Beams" },
       { "command": "beams.showActivityDetail", "title": "Show Detail", "category": "Beams" }
     ],
     "menus": {
@@ -89,6 +90,7 @@
       ],
       "view/item/context": [
         { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
+        { "command": "beams.run", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.ssh", "when": "view == beamsList", "group": "inline" },
         { "command": "beams.openFiles", "when": "view == beamsList", "group": "1_connect" },
         { "command": "beams.publish", "when": "view == beamsList && viewItem == beam", "group": "2_actions" },

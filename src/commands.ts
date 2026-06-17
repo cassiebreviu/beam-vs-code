@@ -397,6 +397,53 @@ export function registerCommands(
             }
         }),
 
+        vscode.commands.registerCommand('beams.run', async (item?: BeamItem) => {
+            const beamId = item?.beam?.id;
+            if (!beamId) {
+                vscode.window.showErrorMessage('Select a beam first.');
+                return;
+            }
+
+            const command = await vscode.window.showInputBox({
+                prompt: 'Command to run on the beam (must listen on port 8080)',
+                placeHolder: 'npm start / python3 -m http.server 8080 / go run .',
+            });
+            if (!command) {
+                return;
+            }
+
+            const terminal = vscode.window.createTerminal({
+                name: `Run: ${beamId}`,
+                shellPath: 'tsh',
+                shellArgs: ['beams', 'exec', beamId, '--', 'bash', '-c', command],
+                iconPath: new vscode.ThemeIcon('play'),
+            });
+            terminal.show();
+
+            try {
+                const url = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
+                    () => publishBeam(beamId)
+                );
+                const action = await vscode.window.showInformationMessage(
+                    `Beam running and published: ${url}`,
+                    'Open in Browser',
+                    'Copy URL',
+                    'Open in VS Code (Remote-SSH)'
+                );
+                if (action === 'Open in Browser') {
+                    vscode.env.openExternal(vscode.Uri.parse(url));
+                } else if (action === 'Copy URL') {
+                    await vscode.env.clipboard.writeText(url);
+                } else if (action === 'Open in VS Code (Remote-SSH)') {
+                    await vscode.commands.executeCommand('beams.connect', item);
+                }
+                provider.refresh();
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
         vscode.commands.registerCommand('beams.showActivityDetail', (item: { detail?: string; label?: string | vscode.TreeItemLabel }) => {
             if (!item?.detail) {
                 return;

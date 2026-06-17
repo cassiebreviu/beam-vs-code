@@ -18,37 +18,6 @@ export async function setupGitCredentials(sshHost: string, secrets: vscode.Secre
     await exec('ssh', ['-o', 'StrictHostKeyChecking=no', sshHost, script], { timeout: 15000 });
 }
 
-export async function promptAndStoreGithubPat(secrets: vscode.SecretStorage): Promise<void> {
-    const config = vscode.workspace.getConfiguration('beams');
-    let username = config.get<string>('github.username');
-
-    if (!username) {
-        username = await vscode.window.showInputBox({
-            prompt: 'Enter your GitHub username',
-            placeHolder: 'octocat',
-        });
-        if (!username) {
-            return;
-        }
-        await config.update('github.username', username, vscode.ConfigurationTarget.Global);
-    }
-
-    const pat = await vscode.window.showInputBox({
-        prompt: 'Enter your GitHub Personal Access Token',
-        password: true,
-        placeHolder: 'ghp_... or github_pat_...',
-    });
-    if (!pat) {
-        return;
-    }
-    await secrets.store(SECRET_KEY, pat);
-    vscode.window.showInformationMessage('GitHub credentials saved. They will be applied to new beams automatically.');
-}
-
-export async function clearGithubPat(secrets: vscode.SecretStorage): Promise<void> {
-    await secrets.delete(SECRET_KEY);
-    vscode.window.showInformationMessage('GitHub PAT cleared.');
-}
 
 export interface GithubSetupOptions {
     beamId: string;

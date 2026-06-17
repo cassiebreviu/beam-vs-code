@@ -5,7 +5,7 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
-import { setupGitCredentials, promptAndStoreGithubPat, clearGithubPat, setupGithubOnBeam, openOAuthTerminal } from './github';
+import { setupGitCredentials, setupGithubOnBeam, openOAuthTerminal } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
@@ -285,9 +285,6 @@ export function registerCommands(
             vscode.window.showInformationMessage('URL copied to clipboard.');
         }),
 
-        vscode.commands.registerCommand('beams.setGithubPat', () => promptAndStoreGithubPat(context.secrets)),
-
-        vscode.commands.registerCommand('beams.clearGithubPat', () => clearGithubPat(context.secrets)),
 
         vscode.commands.registerCommand('beams.setupGithub', async (item?: BeamItem) => {
             const beamId = item?.beam?.id;

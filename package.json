@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -28,6 +28,10 @@
     },
     "views": {
       "teleport-beams": [
+        {
+          "id": "beamClusters",
+          "name": "Clusters"
+        },
         {
           "id": "beamsList",
           "name": "Beams"

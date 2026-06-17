@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BeamItem } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
 import { setupGitCredentials, setupGithubOnBeam, openOAuthTerminal } from './github';
@@ -287,10 +287,24 @@ export function registerCommands(
 
 
         vscode.commands.registerCommand('beams.setupGithub', async (item?: BeamItem) => {
-            const beamId = item?.beam?.id;
+            let beamId = item?.beam?.id;
             if (!beamId) {
-                vscode.window.showErrorMessage('Select a beam first.');
-                return;
+                const beams = await listBeams();
+                if (beams.length === 0) {
+                    vscode.window.showErrorMessage('No beams available. Create a beam first.');
+                    return;
+                }
+                const picked = await vscode.window.showQuickPick(
+                    beams.map(b => ({
+                        label: b.id,
+                        description: b.owner ? `Owner: ${b.owner}` : undefined,
+                    })),
+                    { placeHolder: 'Select a beam to set up GitHub on' }
+                );
+                if (!picked) {
+                    return;
+                }
+                beamId = picked.label;
             }
 
             const username = await vscode.window.showInputBox({

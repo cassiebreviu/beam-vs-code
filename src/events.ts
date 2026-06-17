@@ -33,13 +33,15 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
     private events: AgentEvent[] = [];
     private pollInterval: NodeJS.Timeout | undefined;
     private transcriptPath: string | undefined;
-    private lastContent = '';
+    private bytesRead = 0;
+    private initialLoadDone = false;
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
         this.events = [];
         this.transcriptPath = undefined;
-        this.lastContent = '';
+        this.bytesRead = 0;
+        this.initialLoadDone = false;
         this.startPolling();
         this._onDidChangeTreeData.fire(undefined);
     }
@@ -66,11 +68,11 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
                 if (!this.transcriptPath) return;
             }
 
-            const output = await execOnBeam(this.currentBeam.id, [
-                'tail', '-n', '100', this.transcriptPath
+            const sizeOutput = await execOnBeam(this.currentBeam.id, [
+                'stat', '--format=%s', this.transcriptPath
             ]);
-
-            if (!output.trim()) {
+            const fileSize = parseInt(sizeOutput.trim(), 10);
+            if (isNaN(fileSize) || fileSize === 0) {
                 if (this.events.length > 0) {
                     this.events = [];
                     this._onDidChangeTreeData.fire(undefined);
@@ -78,14 +80,35 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
                 return;
             }
 
-            if (output === this.lastContent) return;
-            this.lastContent = output;
+            if (fileSize === this.bytesRead) return;
+
+            let output: string;
+            if (!this.initialLoadDone) {
+                output = await execOnBeam(this.currentBeam.id, [
+                    'cat', this.transcriptPath
+                ], 60000);
+                this.initialLoadDone = true;
+            } else {
+                output = await execOnBeam(this.currentBeam.id, [
+                    'tail', '-c', `+${this.bytesRead + 1}`, this.transcriptPath
+                ]);
+            }
+
+            this.bytesRead = fileSize;
+
+            if (!output.trim()) return;
 
             const lines = output.split('\n').filter(l => l.trim());
-            this.events = this.parseEvents(lines);
-            this._onDidChangeTreeData.fire(undefined);
+            const newEvents = this.parseEvents(lines);
+
+            if (newEvents.length > 0) {
+                this.events.push(...newEvents);
+                this._onDidChangeTreeData.fire(undefined);
+            }
         } catch {
             this.transcriptPath = undefined;
+            this.bytesRead = 0;
+            this.initialLoadDone = false;
         }
     }
 
@@ -93,11 +116,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
-                'bash', '-c', 'find /home/beams/.claude/projects -name "*.jsonl" -not -path "*/subagents/*" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-'
+                'bash', '-c',
+                'find /home/beams/.claude/projects -name "*.jsonl" -not -path "*/subagents/*" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-; ' +
+                'find /home/beams/.claude -maxdepth 1 -name "*.jsonl" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-'
             ]);
-            const path = output.trim();
-            if (!path) return undefined;
-            return path;
+            const paths = output.trim().split('\n').filter(Boolean);
+            if (paths.length === 0) return undefined;
+            return paths[0];
         } catch {
             return undefined;
         }
@@ -116,7 +141,7 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
             }
         }
 
-        return events.slice(-50);
+        return events;
     }
 
     private toEvents(parsed: Record<string, unknown>): AgentEvent[] {
@@ -237,10 +262,12 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         }
 
         if (this.events.length === 0) {
-            const msg = this.transcriptPath
-                ? 'Waiting for events...'
-                : 'No agent session found on this beam';
-            const icon = this.transcriptPath ? 'loading~spin' : 'info';
+            const msg = !this.initialLoadDone
+                ? 'Loading event history...'
+                : this.transcriptPath
+                    ? 'Waiting for events...'
+                    : 'No agent session found on this beam';
+            const icon = !this.initialLoadDone || this.transcriptPath ? 'loading~spin' : 'info';
             return [new EventItem({ timestamp: '', type: 'info', summary: msg, icon })];
         }
 

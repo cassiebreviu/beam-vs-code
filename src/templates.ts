@@ -9,61 +9,9 @@ export interface BeamTemplate {
 
 export const builtinTemplates: BeamTemplate[] = [
     {
-        label: 'Python',
-        description: 'Python 3 with venv and pip',
-        commands: [
-            'python3 -m venv /home/beams/project/.venv',
-            'mkdir -p /home/beams/project',
-            '/home/beams/project/.venv/bin/pip install --upgrade pip',
-        ],
-    },
-    {
-        label: 'Node.js',
-        description: 'Node.js project with npm init',
-        commands: [
-            'mkdir -p /home/beams/project',
-            'cd /home/beams/project && npm init -y',
-        ],
-    },
-    {
-        label: 'TypeScript',
-        description: 'TypeScript project with tsconfig',
-        commands: [
-            'mkdir -p /home/beams/project',
-            'cd /home/beams/project && npm init -y && npm install typescript @types/node --save-dev && npx tsc --init',
-        ],
-    },
-    {
-        label: 'Go',
-        description: 'Go module project',
-        commands: [
-            'mkdir -p /home/beams/project',
-            'cd /home/beams/project && go mod init project',
-        ],
-    },
-    {
-        label: 'React',
-        description: 'Vite + React + TypeScript',
-        commands: [
-            'npm create vite@latest /home/beams/project -- --template react-ts',
-            'cd /home/beams/project && npm install',
-        ],
-    },
-    {
-        label: 'FastAPI',
-        description: 'Python FastAPI with uvicorn',
-        commands: [
-            'mkdir -p /home/beams/project',
-            'python3 -m venv /home/beams/project/.venv',
-            '/home/beams/project/.venv/bin/pip install fastapi uvicorn',
-        ],
-    },
-    {
-        label: 'Empty',
-        description: 'Just a blank project directory',
-        commands: [
-            'mkdir -p /home/beams/project',
-        ],
+        label: 'Default',
+        description: 'Empty beam',
+        commands: [],
     },
 ];
 

@@ -57,7 +57,7 @@ async function getTshConfig(): Promise<string | null> {
     }
 }
 
-function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
+function patchTshConfigForBeams(tshConfig: string, cluster: string, proxy: string): string {
     const shVariant = cluster.replace(/\.beams\.run$/, '.beams.sh');
     const lines = tshConfig.split('\n');
     const result: string[] = [];
@@ -66,7 +66,6 @@ function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
     for (const line of lines) {
         if (line.startsWith('Host ') && (line.includes(cluster) || line.includes(shVariant))) {
             inClusterBlock = true;
-            // Rewrite the Host line to use the .beams.run domain
             result.push(line.replace(shVariant, cluster));
             continue;
         } else if (line.startsWith('Host ') && inClusterBlock) {
@@ -80,7 +79,7 @@ function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
             if (line.trim().startsWith('ProxyCommand ')) {
                 const tshPath = getTshPath();
                 result.push(`    StrictHostKeyChecking no`);
-                result.push(`    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`);
+                result.push(`    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${proxy}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`);
                 continue;
             }
         }
@@ -91,7 +90,7 @@ function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
     return result.join('\n');
 }
 
-function buildBeamsBlock(cluster: string, beamId: string): string {
+function buildBeamsBlock(cluster: string, proxy: string, beamId: string): string {
     const tshPath = getTshPath();
     const wildcardHost = `*.${cluster}`;
     const beamHost = `vscode+${beamId}.${cluster}`;
@@ -101,7 +100,7 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
         `Host ${wildcardHost} !${cluster}`,
         '    StrictHostKeyChecking no',
         '    UserKnownHostsFile /dev/null',
-        `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+        `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${proxy}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
         '',
         `Host ${beamHost}`,
         `    HostName ${beamId}.${cluster}`,
@@ -114,6 +113,7 @@ function buildBeamsBlock(cluster: string, beamId: string): string {
 
 export async function ensureBeamSshConfig(beamId: string, rawCluster: string): Promise<string> {
     const cluster = sshCluster(rawCluster);
+    const proxy = rawCluster;
     const host = `vscode+${beamId}.${cluster}`;
     let config = readSshConfig();
 
@@ -143,7 +143,7 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
     // Also check for the .beams.sh variant since tsh config may have generated that
     const rawClusterPattern = rawCluster !== cluster ? `*.${rawCluster}` : null;
     if ((config.includes(`*.${cluster}`) || (rawClusterPattern && config.includes(rawClusterPattern))) && !config.includes(MARKER_START)) {
-        config = patchTshConfigForBeams(config, cluster);
+        config = patchTshConfigForBeams(config, cluster, proxy);
         const beamEntry = [
             '',
             MARKER_START,
@@ -172,7 +172,7 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
     if (!config.includes(MARKER_START)) {
         const tshConfig = await getTshConfig();
         if (tshConfig) {
-            const patched = patchTshConfigForBeams(tshConfig, cluster);
+            const patched = patchTshConfigForBeams(tshConfig, cluster, proxy);
             const block = [
                 MARKER_START,
                 `Host ${host}`,
@@ -214,7 +214,7 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
         }
     }
 
-    const block = buildBeamsBlock(cluster, beamId);
+    const block = buildBeamsBlock(cluster, proxy, beamId);
     if (config.length > 0 && !config.endsWith('\n')) {
         config += '\n';
     }

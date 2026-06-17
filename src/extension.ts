@@ -4,7 +4,6 @@ import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
-import { FileChangesProvider } from './fileChanges';
 import { ClustersProvider } from './clusters';
 import { registerCommands } from './commands';
 
@@ -13,7 +12,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const fileExplorer = new BeamFileExplorer();
     const activityProvider = new AgentActivityProvider();
     const eventsProvider = new AgentEventsProvider();
-    const fileChangesProvider = new FileChangesProvider();
     const clustersProvider = new ClustersProvider();
 
     vscode.window.createTreeView('beamClusters', {
@@ -41,11 +39,6 @@ export function activate(context: vscode.ExtensionContext): void {
         showCollapseAll: false,
     });
 
-    vscode.window.createTreeView('beamFileChanges', {
-        treeDataProvider: fileChangesProvider,
-        showCollapseAll: false,
-    });
-
     const fsProvider = new BeamFileSystemProvider();
     context.subscriptions.push(
         vscode.workspace.registerFileSystemProvider('beam', fsProvider, {
@@ -53,13 +46,13 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider, fileChangesProvider);
+    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider);
 
     context.subscriptions.push({ dispose: () => provider.dispose() });
     context.subscriptions.push({ dispose: () => activityProvider.stop() });
     context.subscriptions.push({ dispose: () => eventsProvider.stop() });
-    context.subscriptions.push({ dispose: () => fileChangesProvider.stop() });
     context.subscriptions.push({ dispose: () => clustersProvider.dispose() });
 }
 
 export function deactivate(): void {}
+

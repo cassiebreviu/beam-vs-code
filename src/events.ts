@@ -131,6 +131,24 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         const content = msg.content;
 
         if (role === 'user') {
+            // Tool result entries have role:'user' but content is [{type:'tool_result',...}]
+            if (Array.isArray(content)) {
+                for (const block of content) {
+                    const b = block as Record<string, unknown>;
+                    if (b.type === 'tool_result') {
+                        const isError = b.is_error === true;
+                        const text = extractToolResultText(b.content);
+                        const snippet = text ? truncate(text, 70) : '';
+                        return [{
+                            timestamp: ts,
+                            type: 'tool_result',
+                            summary: isError ? `Error: ${snippet || 'tool failed'}` : (snippet || 'Tool completed'),
+                            detail: text || undefined,
+                            icon: isError ? 'error' : 'check',
+                        }];
+                    }
+                }
+            }
             const text = extractText(content);
             if (!text) return [];
             return [{
@@ -191,27 +209,7 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
             return events;
         }
 
-        // Tool results — detect errors and show output snippet
-        if (Array.isArray(content)) {
-            for (const block of content) {
-                const b = block as Record<string, unknown>;
-                if (b.type === 'tool_result') {
-                    const isError = b.is_error === true;
-                    const resultContent = b.content;
-                    const text = extractToolResultText(resultContent);
-                    const snippet = text ? truncate(text, 70) : '';
-                    return [{
-                        timestamp: ts,
-                        type: 'tool_result',
-                        summary: isError ? `Error: ${snippet || 'tool failed'}` : (snippet || 'Tool completed'),
-                        detail: text || undefined,
-                        icon: isError ? 'error' : 'check',
-                    }];
-                }
-            }
-        }
-
-        // Top-level tool_result (alternate format)
+        // Fallback for any other entry type with tool_result content
         if (parsed.type === 'tool_result' || msg.type === 'tool_result') {
             const isError = (msg.is_error === true) || (parsed.is_error === true);
             const resultContent = msg.content ?? parsed.content;

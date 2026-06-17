@@ -127,6 +127,9 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
         let model = 'claude-sonnet-4';
         const toolCalls: ToolCall[] = [];
         let messages = 0;
+        const countedUsageIds = new Set<string>();
+        const countedMsgIds = new Set<string>();
+        const pendingToolUses = new Map<string, ToolCall>();
 
         for (const line of lines) {
             try {
@@ -136,35 +139,52 @@ export class AgentActivityProvider implements vscode.TreeDataProvider<ActivityIt
                 const msg = parsed.message;
                 if (msg.model) model = msg.model;
 
-                if (msg.usage) {
+                // Each API response is split into one JSONL entry per content block,
+                // all sharing the same msg.id and usage. Deduplicate by msg.id.
+                const msgId = msg.id as string | undefined;
+                if (msg.usage && msgId && !countedUsageIds.has(msgId)) {
+                    countedUsageIds.add(msgId);
                     tokensIn += msg.usage.input_tokens ?? 0;
                     tokensOut += msg.usage.output_tokens ?? 0;
                     cacheRead += msg.usage.cache_read_input_tokens ?? 0;
                     cacheWrite += msg.usage.cache_creation_input_tokens ?? 0;
                 }
 
-                if (parsed.type === 'assistant' || parsed.type === 'user') {
+                // Count conversation turns: user prompts (not tool results) and
+                // assistant responses (deduplicated by msg.id)
+                if (parsed.type === 'user' && !parsed.toolUseResult) {
+                    messages++;
+                } else if (parsed.type === 'assistant' && msgId && !countedMsgIds.has(msgId)) {
+                    countedMsgIds.add(msgId);
                     messages++;
                 }
 
                 if (Array.isArray(msg.content)) {
                     for (const block of msg.content) {
                         if (block.type === 'tool_use') {
-                            toolCalls.push({
+                            const tc: ToolCall = {
                                 tool: block.name ?? '?',
                                 args: summarizeArgs(block.input),
                                 fullArgs: block.input,
-                            });
+                            };
+                            toolCalls.push(tc);
+                            if (block.id) {
+                                pendingToolUses.set(block.id, tc);
+                            }
                         }
-                        if (block.type === 'tool_result' && toolCalls.length > 0) {
+                        // Tool results come in separate type:'user' entries
+                        if (block.type === 'tool_result') {
                             const text = typeof block.content === 'string'
                                 ? block.content
                                 : Array.isArray(block.content)
                                     ? block.content.map((c: { text?: string }) => c.text ?? '').join('\n')
                                     : '';
-                            const target = toolCalls.find(tc => !tc.result);
+                            const target = block.tool_use_id
+                                ? pendingToolUses.get(block.tool_use_id)
+                                : undefined;
                             if (target) {
                                 target.result = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
+                                pendingToolUses.delete(block.tool_use_id);
                             }
                         }
                     }

@@ -81,6 +81,3 @@ The extension automatically manages `~/.ssh/config` entries for beam connections
 npm run package    # builds and produces teleport-beams-<version>.vsix
 ```
 
-## License
-
-Apache-2.0

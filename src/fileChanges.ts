@@ -3,10 +3,11 @@ import { Beam, execOnBeam } from './tsh';
 
 type ChangeStatus = 'M' | 'A' | 'D' | 'R' | '?';
 
-interface FileChange {
+export interface FileChange {
     status: ChangeStatus;
     path: string;
     beamId: string;
+    repoPath: string;
 }
 
 const STATUS_ICONS: Record<ChangeStatus, string> = {
@@ -53,11 +54,13 @@ export class FileChangesProvider implements vscode.TreeDataProvider<FileChangeIt
     private changes: FileChange[] = [];
     private pollInterval: NodeJS.Timeout | undefined;
     private lastOutput = '';
+    private repoPath: string | undefined;
 
     setBeam(beam: Beam): void {
         this.currentBeam = beam;
         this.changes = [];
         this.lastOutput = '';
+        this.repoPath = undefined;
         this.startPolling();
         this._onDidChangeTreeData.fire(undefined);
     }
@@ -84,21 +87,39 @@ export class FileChangesProvider implements vscode.TreeDataProvider<FileChangeIt
         if (!this.currentBeam) return;
 
         try {
+            if (!this.repoPath) {
+                this.repoPath = await this.findGitRepo();
+                if (!this.repoPath) return;
+            }
+
             const output = await execOnBeam(this.currentBeam.id, [
-                'bash', '-c', 'cd /home/beams && git status --porcelain 2>/dev/null || true'
+                'bash', '-c', `cd "${this.repoPath}" && git status --porcelain 2>/dev/null || true`
             ]);
 
             if (output === this.lastOutput) return;
             this.lastOutput = output;
 
-            this.changes = this.parseStatus(output, this.currentBeam.id);
+            this.changes = this.parseStatus(output, this.currentBeam.id, this.repoPath!);
             this._onDidChangeTreeData.fire(undefined);
         } catch {
-            // beam may not have git initialized
+            this.repoPath = undefined;
         }
     }
 
-    private parseStatus(output: string, beamId: string): FileChange[] {
+    private async findGitRepo(): Promise<string | undefined> {
+        if (!this.currentBeam) return undefined;
+        try {
+            const output = await execOnBeam(this.currentBeam.id, [
+                'bash', '-c', 'find /home/beams -maxdepth 3 -name ".git" -type d 2>/dev/null | head -1 | xargs dirname'
+            ]);
+            const path = output.trim();
+            return path || undefined;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private parseStatus(output: string, beamId: string, repoPath: string): FileChange[] {
         const lines = output.trim().split('\n').filter(Boolean);
         const changes: FileChange[] = [];
 
@@ -120,7 +141,7 @@ export class FileChangesProvider implements vscode.TreeDataProvider<FileChangeIt
                 status = 'M';
             }
 
-            changes.push({ status, path: filePath, beamId });
+            changes.push({ status, path: filePath, beamId, repoPath });
         }
 
         return changes;
@@ -132,7 +153,7 @@ export class FileChangesProvider implements vscode.TreeDataProvider<FileChangeIt
 
     getChildren(): FileChangeItem[] {
         if (!this.currentBeam) {
-            return [new FileChangeItem({ status: 'M', path: 'Select a beam to view changes', beamId: '' })];
+            return [new FileChangeItem({ status: 'M', path: 'Select a beam to view changes', beamId: '', repoPath: '' })];
         }
 
         if (this.changes.length === 0) {

@@ -78,20 +78,22 @@ export async function setupGithubOnBeam(
             progress.report({ message: 'Authenticating with GitHub...' });
             const escapedPat = pat.trim().replace(/'/g, "'\\''");
             await execScriptOnBeam(beamId, `printf '%s' '${escapedPat}' | gh auth login -h github.com -p https --with-token`, timeout);
+            progress.report({ message: 'Configuring git credential helper...' });
+            await execScriptOnBeam(beamId, 'gh auth setup-git', timeout);
         }
 
         progress.report({ message: 'Configuring Teleport git proxy...' });
-        await execOnBeam(beamId, ['bash', '-c', 'tsh git config update 2>/dev/null || true'], timeout);
+        await execScriptOnBeam(beamId, 'tsh git config update 2>/dev/null || true', timeout);
     }
 
     if (cloneRepo) {
         progress.report({ message: `Cloning ${cloneRepo}...` });
         const cloneCmd = authMethod === 'tsh-git'
-            ? `git clone git@github.com:${cloneRepo}.git${cloneDir ? ' "' + cloneDir + '"' : ''}`
+            ? `git clone git@github.com:${cloneRepo}.git${cloneDir ? ` "${cloneDir}"` : ''}`
             : cloneDir
                 ? `gh repo clone "${cloneRepo}" "${cloneDir}"`
                 : `gh repo clone "${cloneRepo}"`;
-        await execOnBeam(beamId, ['bash', '-c', cloneCmd], timeout);
+        await execScriptOnBeam(beamId, cloneCmd, 300000);
     }
 }
 

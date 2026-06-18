@@ -4,9 +4,28 @@ import { execOnBeam } from './tsh';
 export class BeamFileSystemProvider implements vscode.FileSystemProvider {
     private _onDidChangeFile = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
     readonly onDidChangeFile = this._onDidChangeFile.event;
+    private mtimeCache = new Map<string, number>();
 
     watch(): vscode.Disposable {
         return new vscode.Disposable(() => {});
+    }
+
+    handleStatUpdate(beamId: string, stats: Map<string, number>): void {
+        const events: vscode.FileChangeEvent[] = [];
+        for (const [remotePath, mtime] of stats) {
+            const key = `${beamId}:${remotePath}`;
+            const cached = this.mtimeCache.get(key);
+            if (cached !== undefined && cached !== mtime) {
+                events.push({
+                    type: vscode.FileChangeType.Changed,
+                    uri: vscode.Uri.parse(`beam://${beamId}${remotePath}`),
+                });
+            }
+            this.mtimeCache.set(key, mtime);
+        }
+        if (events.length > 0) {
+            this._onDidChangeFile.fire(events);
+        }
     }
 
     async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
@@ -66,6 +85,9 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
         await execOnBeam(beamId, [
             'bash', '-c', `echo '${encoded}' | base64 -d > '${remotePath}'`
         ]);
+        // Update mtime cache to suppress false-positive change events from our own write
+        const key = `${beamId}:${remotePath}`;
+        this.mtimeCache.set(key, Math.floor(Date.now() / 1000));
         this._onDidChangeFile.fire([{ type: vscode.FileChangeType.Changed, uri }]);
     }
 

@@ -2,11 +2,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+export interface TemplateGithub {
+    username?: string;
+    email?: string;
+    authMethod?: 'pat' | 'oauth' | 'tsh-git';
+    cloneRepo?: string;
+}
+
+export interface TemplateEnvSnapshot {
+    gitConfig?: Array<{ key: string; value: string }>;
+    envVars?: string[];
+    binScriptsTar?: string;
+    systemdUnits?: Array<{ name: string; content: string }>;
+}
+
 export interface BeamTemplate {
     label: string;
     description: string;
     commands: string[];
     custom?: boolean;
+    github?: TemplateGithub;
+    envSnapshot?: TemplateEnvSnapshot;
 }
 
 export const builtinTemplates: BeamTemplate[] = [
@@ -47,12 +63,20 @@ export async function saveCustomTemplate(template: BeamTemplate): Promise<void> 
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
-    const custom = getCustomTemplates().map(({ label, description, commands }) => ({ label, description, commands }));
-    custom.push({
+    const custom = getCustomTemplates().map(({ label, description, commands, github, envSnapshot }) => {
+        const t: Record<string, unknown> = { label, description, commands };
+        if (github) t.github = github;
+        if (envSnapshot) t.envSnapshot = envSnapshot;
+        return t;
+    });
+    const entry: Record<string, unknown> = {
         label: template.label,
         description: template.description,
         commands: template.commands,
-    });
+    };
+    if (template.github) entry.github = template.github;
+    if (template.envSnapshot) entry.envSnapshot = template.envSnapshot;
+    custom.push(entry);
     fs.writeFileSync(filePath, JSON.stringify(custom, null, 2), 'utf-8');
 }
 
@@ -60,7 +84,12 @@ export async function deleteCustomTemplate(label: string): Promise<void> {
     const filePath = getTemplatesPath();
     const custom = getCustomTemplates()
         .filter(t => t.label !== label)
-        .map(({ label, description, commands }) => ({ label, description, commands }));
+        .map(({ label, description, commands, github, envSnapshot }) => {
+            const t: Record<string, unknown> = { label, description, commands };
+            if (github) t.github = github;
+            if (envSnapshot) t.envSnapshot = envSnapshot;
+            return t;
+        });
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });

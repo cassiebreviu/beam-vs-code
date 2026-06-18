@@ -23,13 +23,14 @@ class FileItem extends vscode.TreeItem {
 
         this.contextValue = entry.isDirectory ? 'beamFolder' : 'beamFile';
 
+        this.resourceUri = vscode.Uri.parse(`beam://${entry.beamId}${entry.path}`);
+
         if (!entry.isDirectory) {
             this.command = {
                 command: 'beams.openFile',
                 title: 'Open File',
                 arguments: [entry],
             };
-            this.resourceUri = vscode.Uri.parse(`beam://${entry.beamId}${entry.path}`);
         }
     }
 }

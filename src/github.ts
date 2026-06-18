@@ -59,8 +59,7 @@ export async function setupGithubOnBeam(
     await execOnBeam(beamId, ['git', 'config', '--global', 'user.email', email], timeout);
 
     if (authMethod === 'tsh-git') {
-        progress.report({ message: 'Configuring Teleport git proxy...' });
-        await execScriptOnBeam(beamId, 'tsh git config update', timeout);
+        // tsh git config update is a per-repo command; run it after cloning, not here
     } else {
         progress.report({ message: 'Checking GitHub CLI...' });
         let ghInstalled = false;
@@ -88,12 +87,24 @@ export async function setupGithubOnBeam(
 
     if (cloneRepo) {
         progress.report({ message: `Cloning ${cloneRepo}...` });
+        const ownerRepo = toOwnerRepo(cloneRepo);
+        const repoName = ownerRepo.split('/').pop()?.replace(/\.git$/, '') || 'repo';
+        const resolvedCloneDir = cloneDir?.trim().replace(/\/+$/, '') || `/home/beams/${repoName}`;
         const cloneCmd = authMethod === 'tsh-git'
-            ? `git clone git@github.com:${cloneRepo}.git${cloneDir ? ` "${cloneDir}"` : ''}`
-            : cloneDir
-                ? `gh repo clone "${cloneRepo}" "${cloneDir}"`
-                : `gh repo clone "${cloneRepo}"`;
-        await execScriptOnBeam(beamId, cloneCmd, 300000);
+            ? `tsh git clone git@github.com:${ownerRepo}.git "${resolvedCloneDir}"`
+            : `ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null; gh repo clone "${ownerRepo}" "${resolvedCloneDir}"`;
+        await execScriptOnBeam(beamId, [
+            `if [ -d "${resolvedCloneDir}/.git" ]; then`,
+            `  echo "Repo already exists at ${resolvedCloneDir}, skipping clone."`,
+            `else`,
+            `  ${cloneCmd}`,
+            `fi`,
+        ].join('\n'), 300000);
+
+        if (authMethod === 'tsh-git') {
+            progress.report({ message: 'Configuring Teleport git proxy...' });
+            await execScriptOnBeam(beamId, `cd "${resolvedCloneDir}" && tsh git config update`, timeout);
+        }
     }
 }
 
@@ -162,6 +173,13 @@ export async function autoSetupGithub(
     } catch (err) {
         return { applied: false, error: err instanceof Error ? err.message : String(err) };
     }
+}
+
+// Normalise any GitHub URL variant to "owner/repo".
+// Accepts: https://github.com/owner/repo[.git], git@github.com:owner/repo[.git], owner/repo
+function toOwnerRepo(input: string): string {
+    const m = input.trim().match(/(?:github\.com[/:])([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/);
+    return m ? m[1] : input.replace(/\.git$/, '').replace(/\/+$/, '');
 }
 
 export function openOAuthTerminal(beamId: string): void {

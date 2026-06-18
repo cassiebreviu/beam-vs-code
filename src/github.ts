@@ -55,18 +55,29 @@ export async function setupGithubOnBeam(
     const timeout = 120000;
 
     progress.report({ message: 'Configuring git identity...' });
-    await execOnBeam(beamId, ['bash', '-c', `git config --global user.name "${username}" && git config --global user.email "${email}"`], timeout);
+    await execOnBeam(beamId, ['git', 'config', '--global', 'user.name', username], timeout);
+    await execOnBeam(beamId, ['git', 'config', '--global', 'user.email', email], timeout);
 
     if (authMethod === 'tsh-git') {
         progress.report({ message: 'Configuring Teleport git proxy...' });
         await execScriptOnBeam(beamId, 'tsh git config update', timeout);
     } else {
-        progress.report({ message: 'Installing GitHub CLI...' });
-        await execScriptOnBeam(beamId, GH_INSTALL_SCRIPT, timeout);
+        progress.report({ message: 'Checking GitHub CLI...' });
+        let ghInstalled = false;
+        try {
+            await execOnBeam(beamId, ['which', 'gh'], timeout);
+            ghInstalled = true;
+        } catch { /* not installed */ }
+
+        if (!ghInstalled) {
+            progress.report({ message: 'Installing GitHub CLI...' });
+            await execScriptOnBeam(beamId, GH_INSTALL_SCRIPT, timeout);
+        }
 
         if (authMethod === 'pat' && pat) {
             progress.report({ message: 'Authenticating with GitHub...' });
-            await execOnBeam(beamId, ['bash', '-c', `echo "${pat}" | gh auth login -h github.com -p https --with-token`], timeout);
+            const escapedPat = pat.trim().replace(/'/g, "'\\''");
+            await execScriptOnBeam(beamId, `printf '%s' '${escapedPat}' | gh auth login -h github.com -p https --with-token`, timeout);
         }
 
         progress.report({ message: 'Configuring Teleport git proxy...' });

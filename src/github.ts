@@ -109,12 +109,15 @@ export async function isTshGitAvailable(beamId: string): Promise<boolean> {
 export async function autoSetupGithub(
     beamId: string,
     context: vscode.ExtensionContext,
-    progress: vscode.Progress<{ message?: string; increment?: number }>
+    progress: vscode.Progress<{ message?: string; increment?: number }>,
+    force = false,
 ): Promise<{ applied: boolean; error?: string }> {
     const config = vscode.workspace.getConfiguration('beams');
-    const autoSetup = config.get<boolean>('github.autoSetup', true);
-    if (!autoSetup) {
-        return { applied: false };
+    if (!force) {
+        const autoSetup = config.get<boolean>('github.autoSetup', true);
+        if (!autoSetup) {
+            return { applied: false };
+        }
     }
 
     const username = config.get<string>('github.username');

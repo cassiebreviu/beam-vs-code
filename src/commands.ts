@@ -91,6 +91,28 @@ export function registerCommands(
                 }
             }
 
+            // Ask whether to apply saved GitHub credentials (only when not using template config)
+            let applyGithubCredentials = false;
+            if (!useTemplateGithub) {
+                const cfg = vscode.workspace.getConfiguration('beams');
+                const savedUsername = cfg.get<string>('github.username');
+                const savedAuthMethod = cfg.get<string>('github.authMethod');
+                if (savedUsername && savedAuthMethod) {
+                    const savedEmail = cfg.get<string>('github.email') || `${savedUsername}@users.noreply.github.com`;
+                    const choice = await vscode.window.showQuickPick(
+                        [
+                            { label: '$(mark-github) Apply saved GitHub credentials', description: `${savedUsername} · ${savedEmail}`, apply: true },
+                            { label: '$(dash) Skip', description: 'Set up GitHub later via Setup GitHub on Beam', apply: false },
+                        ],
+                        { placeHolder: 'Set up GitHub credentials on the new beam?' }
+                    );
+                    if (choice === undefined) {
+                        return;
+                    }
+                    applyGithubCredentials = choice.apply;
+                }
+            }
+
             try {
                 const beam = await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Creating beam (${picked.template.label})...` },
@@ -116,8 +138,8 @@ export function registerCommands(
                                         authMethod: templateGithub.authMethod || 'tsh-git',
                                         cloneRepo: templateGithub.cloneRepo,
                                     }, progress);
-                                } else {
-                                    const result = await autoSetupGithub(b.id, context, progress);
+                                } else if (applyGithubCredentials) {
+                                    const result = await autoSetupGithub(b.id, context, progress, true);
                                     if (result.error) {
                                         vscode.window.showWarningMessage(`GitHub auto-setup: ${result.error}`);
                                     }

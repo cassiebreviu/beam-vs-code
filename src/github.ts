@@ -92,7 +92,7 @@ export async function setupGithubOnBeam(
         const resolvedCloneDir = cloneDir?.trim().replace(/\/+$/, '') || `/home/beams/${repoName}`;
         const cloneCmd = authMethod === 'tsh-git'
             ? `tsh git clone git@github.com:${ownerRepo}.git "${resolvedCloneDir}"`
-            : `ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null; gh repo clone "${ownerRepo}" "${resolvedCloneDir}"`;
+            : `gh repo clone "${ownerRepo}" "${resolvedCloneDir}"`;
         await execScriptOnBeam(beamId, [
             `if [ -d "${resolvedCloneDir}/.git" ]; then`,
             `  echo "Repo already exists at ${resolvedCloneDir}, skipping clone."`,

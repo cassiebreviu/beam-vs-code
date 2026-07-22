@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onCommand:beams.connect", "onFileSystem:beam-git"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onView:beamSessionProfiles", "onCommand:beams.connect", "onFileSystem:beam-git"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -47,6 +47,10 @@
         {
           "id": "beamEvents",
           "name": "Agent Events"
+        },
+        {
+          "id": "beamSessionProfiles",
+          "name": "Session Profiles"
         }
       ]
     },
@@ -76,14 +80,21 @@
       { "command": "beams.gitCommit", "title": "Commit", "icon": "$(check)", "category": "Beams" },
       { "command": "beams.gitDiscard", "title": "Discard Changes", "icon": "$(discard)", "category": "Beams" },
       { "command": "beams.gitRefreshScm", "title": "Refresh Git Status", "icon": "$(refresh)", "category": "Beams" },
-      { "command": "beams.selectScm", "title": "Initialize SCM", "category": "Beams" }
+      { "command": "beams.selectScm", "title": "Initialize SCM", "category": "Beams" },
+      { "command": "beams.saveSessionProfile", "title": "Save Session Profile", "icon": "$(save)", "category": "Beams" },
+      { "command": "beams.resumeSessionProfile", "title": "Resume Session Profile", "icon": "$(play-circle)", "category": "Beams" },
+      { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
+      { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
+      { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
         { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
-        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
+        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" },
+        { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles", "group": "navigation" },
+        { "command": "beams.refreshSessionProfiles", "when": "view == beamSessionProfiles", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
@@ -96,8 +107,11 @@
         { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.saveSessionProfile", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" },
-        { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFile", "group": "inline" }
+        { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFile", "group": "inline" },
+        { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
+        { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" }
       ],
       "scm/title": [
         { "command": "beams.gitCommit", "when": "scmProvider == beam-git", "group": "navigation" },

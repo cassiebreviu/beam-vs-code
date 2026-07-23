@@ -178,6 +178,7 @@
   "scripts": {
     "dev": "tsc -watch -p ./",
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test test/*.test.js",
     "watch": "tsc -watch -p ./",
     "prepackage": "npm run compile",
     "package": "vsce package --no-dependencies",

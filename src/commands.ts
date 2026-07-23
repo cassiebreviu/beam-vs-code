@@ -300,7 +300,7 @@ export function registerCommands(
                 }
                 const host = await ensureBeamSshConfig(item.beam.id, status.cluster);
                 const config = vscode.workspace.getConfiguration('remote.SSH');
-                if (!config.get<boolean>('enableRemoteCommand')) {
+                if (config.inspect<boolean>('enableRemoteCommand') && !config.get<boolean>('enableRemoteCommand')) {
                     await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);
                 }
                 const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}/home/beams`);
@@ -785,7 +785,7 @@ export function registerCommands(
                 const picked = await vscode.window.showQuickPick(
                     all.map(p => ({
                         label: p.label,
-                        description: `${p.gitBranch}@${p.gitCommitSha.slice(0, 7)}`,
+                        description: `${p.gitBranch}@${(p.gitCommitSha ?? '').slice(0, 7)}`,
                         detail: `Updated ${new Date(p.updatedAt).toLocaleString()}`,
                         profile: p,
                     })),

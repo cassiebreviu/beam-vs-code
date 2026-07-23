@@ -18,7 +18,7 @@ Manage and connect to Teleport Beams directly from VS Code. Create, monitor, and
 ## Prerequisites
 
 - [Teleport](https://goteleport.com/docs/installation/) (`tsh` CLI) installed and in your PATH
-- Logged in to your Teleport cluster: `tsh login --proxy=<cluster>.beams.run`
+- Logged in to your Teleport cluster: `tsh login --proxy=<cluster>.beams.sh`
 - VS Code 1.85+
 
 ## Install from VSIX
@@ -70,9 +70,9 @@ Note: this MVP does not yet implement the RFD's scan-before-write/scan-before-lo
 
 The extension automatically manages `~/.ssh/config` entries for beam connections. It:
 
-- Rewrites `tsh config` output to use the correct `.beams.run` domain
+- Uses the `.beams.sh` domain reported by `tsh status`
 - Sets up a `ProxyCommand` that routes through `tsh proxy ssh` using the beam alias
-- Migrates stale `.beams.sh` entries automatically
+- Migrates stale `.beams.run` entries automatically
 
 ## Commands
 

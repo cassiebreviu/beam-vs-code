@@ -61,9 +61,9 @@ The `BeamGitScmProvider` implements `QuickDiffProvider.provideOriginalResource()
 ### SSH config management
 
 `ensureBeamSshConfig()` in `ssh.ts` writes per-beam entries into `~/.ssh/config`. It:
-1. Normalizes `.beams.sh` cluster domains to `.beams.run`
+1. Uses the `.beams.sh` cluster domain reported by `tsh status`
 2. Patches the `ProxyCommand` in any existing `tsh config` output to use `tsh proxy ssh` with the beam alias
-3. Inserts specific `vscode+<beamId>.<cluster>` `Host` entries before wildcard entries so they match first
+3. Inserts specific `vscode--<beamId>.<cluster>` `Host` entries before wildcard entries so they match first
 
 ### Agent activity parsing
 

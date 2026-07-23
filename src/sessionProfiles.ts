@@ -37,7 +37,7 @@ export function listSessionProfiles(): SessionProfile[] {
             profiles.push(JSON.parse(fs.readFileSync(file, 'utf-8')));
         } catch { /* skip corrupt profile */ }
     }
-    profiles.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     return profiles;
 }
 

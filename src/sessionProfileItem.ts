@@ -5,7 +5,7 @@ export class SessionProfileItem extends vscode.TreeItem {
     constructor(public readonly profile: SessionProfile) {
         super(profile.label, vscode.TreeItemCollapsibleState.None);
 
-        const shortSha = profile.gitCommitSha.slice(0, 7);
+        const shortSha = (profile.gitCommitSha ?? '').slice(0, 7);
         this.description = `${profile.gitBranch}@${shortSha}`;
         this.tooltip = [
             `Task: ${profile.taskId}`,

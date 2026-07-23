@@ -5,27 +5,53 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
-import { setupGitCredentials, setupGithubOnBeam, openOAuthTerminal } from './github';
+import { setupGithubOnBeam, openOAuthTerminal, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
+import { SessionProfilesProvider } from './sessionProfilesProvider';
+import { SessionProfileItem } from './sessionProfileItem';
+import {
+    SessionProfile,
+    listSessionProfiles,
+    getSessionSummary,
+    getSessionSummaryPath,
+    saveSessionProfile,
+    deleteSessionProfile,
+    detectRepoRoot,
+    captureGitRef,
+    captureRemoteUrl,
+    captureRecentActivity,
+    generateSessionSummary,
+    cloneRepoOnBeam,
+    applyGitRef,
+    writeSessionSummaryToBeam,
+} from './sessionProfiles';
 import * as path from 'path';
+import * as os from 'os';
 
 export function registerCommands(
     context: vscode.ExtensionContext,
     provider: BeamsProvider,
     fileExplorer: BeamFileExplorer,
     activityProvider: AgentActivityProvider,
-    eventsProvider: AgentEventsProvider
+    eventsProvider: AgentEventsProvider,
+    sessionProfilesProvider: SessionProfilesProvider,
+    poller?: import('./polling').BeamPoller,
+    _getScm?: () => import('./scm').BeamGitScmProvider | undefined,
 ): void {
     context.subscriptions.push(
-        vscode.commands.registerCommand('beams.select', (item: BeamItem) => {
+        vscode.commands.registerCommand('beams.select', async (item: BeamItem) => {
             if (!item?.beam) {
                 return;
             }
             fileExplorer.setBeam(item.beam);
             activityProvider.setBeam(item.beam);
             eventsProvider.setBeam(item.beam);
+            if (poller) {
+                await poller.setBeam(item.beam.id);
+                vscode.commands.executeCommand('beams.selectScm');
+            }
         }),
 
         vscode.commands.registerCommand('beams.refresh', () => {
@@ -63,12 +89,57 @@ export function registerCommands(
                 return;
             }
 
+            // Resolve conflict between template GitHub config and stored preferences
+            let useTemplateGithub = false;
+            const templateGithub = picked.template.github;
+            if (templateGithub?.username) {
+                const cfg = vscode.workspace.getConfiguration('beams');
+                const storedUsername = cfg.get<string>('github.username');
+                const storedEmail = cfg.get<string>('github.email');
+                if (storedUsername && templateGithub.email && storedEmail && templateGithub.email !== storedEmail) {
+                    const choice = await vscode.window.showQuickPick(
+                        [
+                            { label: `Use stored identity (${storedEmail})`, useTemplate: false },
+                            { label: `Use template identity (${templateGithub.email})`, useTemplate: true },
+                        ],
+                        { placeHolder: 'Template has different git identity than your stored preferences' }
+                    );
+                    if (!choice) {
+                        return;
+                    }
+                    useTemplateGithub = choice.useTemplate;
+                }
+            }
+
+            // Ask whether to apply saved GitHub credentials (only when not using template config)
+            let applyGithubCredentials = false;
+            if (!useTemplateGithub) {
+                const cfg = vscode.workspace.getConfiguration('beams');
+                const savedUsername = cfg.get<string>('github.username');
+                const savedAuthMethod = cfg.get<string>('github.authMethod');
+                if (savedUsername && savedAuthMethod) {
+                    const savedEmail = cfg.get<string>('github.email') || `${savedUsername}@users.noreply.github.com`;
+                    const choice = await vscode.window.showQuickPick(
+                        [
+                            { label: '$(mark-github) Apply saved GitHub credentials', description: `${savedUsername} · ${savedEmail}`, apply: true },
+                            { label: '$(dash) Skip', description: 'Set up GitHub later via Setup GitHub on Beam', apply: false },
+                        ],
+                        { placeHolder: 'Set up GitHub credentials on the new beam?' }
+                    );
+                    if (choice === undefined) {
+                        return;
+                    }
+                    applyGithubCredentials = choice.apply;
+                }
+            }
+
             try {
                 const beam = await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Creating beam (${picked.template.label})...` },
-                    async () => {
+                    async (progress) => {
                         const b = await addBeam();
                         if (picked.template.commands.length > 0) {
+                            progress.report({ message: 'Running template setup...' });
                             for (const cmd of picked.template.commands) {
                                 await execOnBeam(b.id, ['bash', '-c', cmd]);
                             }
@@ -76,8 +147,23 @@ export function registerCommands(
                         try {
                             const status = await checkStatus();
                             if (status.loggedIn && status.cluster) {
-                                const host = await ensureBeamSshConfig(b.id, status.cluster);
-                                await setupGitCredentials(host, context.secrets);
+                                await ensureBeamSshConfig(b.id, status.cluster);
+                                if (useTemplateGithub && templateGithub) {
+                                    // Apply template's GitHub config instead of stored prefs
+                                    progress.report({ message: 'Applying template GitHub config...' });
+                                    await setupGithubOnBeam({
+                                        beamId: b.id,
+                                        username: templateGithub.username!,
+                                        email: templateGithub.email || `${templateGithub.username}@users.noreply.github.com`,
+                                        authMethod: templateGithub.authMethod || 'tsh-git',
+                                        cloneRepo: templateGithub.cloneRepo,
+                                    }, progress);
+                                } else if (applyGithubCredentials) {
+                                    const result = await autoSetupGithub(b.id, context, progress, true);
+                                    if (result.error) {
+                                        vscode.window.showWarningMessage(`GitHub auto-setup: ${result.error}`);
+                                    }
+                                }
                             }
                         } catch { /* non-fatal */ }
                         return b;
@@ -98,6 +184,7 @@ export function registerCommands(
             const name = await vscode.window.showInputBox({
                 prompt: 'Template name',
                 placeHolder: 'My Custom Setup',
+                ignoreFocusOut: true,
             });
             if (!name) {
                 return;
@@ -106,6 +193,7 @@ export function registerCommands(
             const description = await vscode.window.showInputBox({
                 prompt: 'Short description',
                 placeHolder: 'Python + Redis + custom tools',
+                ignoreFocusOut: true,
             });
             if (description === undefined) {
                 return;
@@ -115,24 +203,40 @@ export function registerCommands(
                 prompt: 'Setup commands (semicolon-separated)',
                 placeHolder: 'apt install -y redis; pip install redis; mkdir -p /home/beams/project',
                 value: '',
+                ignoreFocusOut: true,
             });
             if (commandsInput === undefined) {
                 return;
             }
 
-            // If user left commands empty, capture installed packages from the beam
+            // If user left commands empty, capture full environment from the beam
             let commands: string[];
+            let envSnapshot: import('./templates').TemplateEnvSnapshot | undefined;
+            let github: import('./templates').TemplateGithub | undefined;
             if (!commandsInput.trim()) {
                 const capture = await vscode.window.showQuickPick(
                     [
-                        { label: 'Capture installed packages', description: 'Auto-detect pip/npm packages on this beam' },
+                        { label: 'Capture full environment', description: 'Auto-detect packages, git config, env vars, scripts' },
                         { label: 'Save with no commands', description: 'Template will just create an empty beam' },
                     ],
                     { placeHolder: 'No commands entered — capture from beam?' }
                 );
 
-                if (capture?.label === 'Capture installed packages') {
-                    commands = await captureBeamConfig(item.beam.id);
+                if (capture?.label === 'Capture full environment') {
+                    const captured = await captureBeamConfig(item.beam.id);
+                    commands = captured.commands;
+                    envSnapshot = captured.envSnapshot;
+                    // Capture current GitHub settings as template defaults
+                    const cfg = vscode.workspace.getConfiguration('beams');
+                    const ghUsername = cfg.get<string>('github.username');
+                    const ghAuthMethod = cfg.get<string>('github.authMethod') as 'pat' | 'oauth' | 'tsh-git' | '';
+                    if (ghUsername && ghAuthMethod) {
+                        github = {
+                            username: ghUsername,
+                            email: cfg.get<string>('github.email') || undefined,
+                            authMethod: ghAuthMethod,
+                        };
+                    }
                 } else {
                     commands = ['mkdir -p /home/beams/project'];
                 }
@@ -140,7 +244,7 @@ export function registerCommands(
                 commands = commandsInput.split(';').map(c => c.trim()).filter(Boolean);
             }
 
-            await saveCustomTemplate({ label: name, description: description || '', commands });
+            await saveCustomTemplate({ label: name, description: description || '', commands, github, envSnapshot });
             vscode.window.showInformationMessage(`Template "${name}" saved.`);
         }),
 
@@ -195,9 +299,6 @@ export function registerCommands(
                     return;
                 }
                 const host = await ensureBeamSshConfig(item.beam.id, status.cluster);
-                try {
-                    await setupGitCredentials(host, context.secrets);
-                } catch { /* non-fatal — beam may not have git yet */ }
                 const config = vscode.workspace.getConfiguration('remote.SSH');
                 if (!config.get<boolean>('enableRemoteCommand')) {
                     await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);
@@ -299,7 +400,7 @@ export function registerCommands(
                         label: b.id,
                         description: b.owner ? `Owner: ${b.owner}` : undefined,
                     })),
-                    { placeHolder: 'Select a beam to set up GitHub on' }
+                    { placeHolder: 'Select a beam to set up GitHub on', ignoreFocusOut: true }
                 );
                 if (!picked) {
                     return;
@@ -310,6 +411,7 @@ export function registerCommands(
             const username = await vscode.window.showInputBox({
                 prompt: 'GitHub username',
                 placeHolder: 'octocat',
+                ignoreFocusOut: true,
             });
             if (!username) {
                 return;
@@ -319,6 +421,7 @@ export function registerCommands(
                 prompt: 'Git email',
                 placeHolder: `${username}@users.noreply.github.com`,
                 value: `${username}@users.noreply.github.com`,
+                ignoreFocusOut: true,
             });
             if (email === undefined) {
                 return;
@@ -326,10 +429,11 @@ export function registerCommands(
 
             const authChoice = await vscode.window.showQuickPick(
                 [
+                    { label: '$(shield) Teleport Git Proxy (tsh git)', description: 'Use Teleport-managed GitHub access — no token needed', method: 'tsh-git' as const },
                     { label: '$(globe) Full account access (OAuth)', description: 'Authenticate via browser — grants access to all your repos', method: 'oauth' as const },
                     { label: '$(key) Fine-grained token (PAT)', description: 'Paste a token scoped to specific repos', method: 'pat' as const },
                 ],
-                { placeHolder: 'How would you like to authenticate with GitHub?' }
+                { placeHolder: 'How would you like to authenticate with GitHub?', ignoreFocusOut: true }
             );
             if (!authChoice) {
                 return;
@@ -341,6 +445,7 @@ export function registerCommands(
                     prompt: 'Paste your GitHub Personal Access Token',
                     password: true,
                     placeHolder: 'ghp_... or github_pat_...',
+                    ignoreFocusOut: true,
                 });
                 if (!pat) {
                     return;
@@ -350,6 +455,7 @@ export function registerCommands(
             const cloneRepo = await vscode.window.showInputBox({
                 prompt: 'Repository to clone (or leave empty to skip)',
                 placeHolder: 'owner/repo',
+                ignoreFocusOut: true,
             });
 
             let cloneDir: string | undefined;
@@ -357,6 +463,7 @@ export function registerCommands(
                 cloneDir = await vscode.window.showInputBox({
                     prompt: 'Clone directory (or leave empty for default)',
                     placeHolder: '/home/beams/my-project',
+                    ignoreFocusOut: true,
                 });
             }
 
@@ -381,6 +488,23 @@ export function registerCommands(
                     vscode.window.showInformationMessage('GitHub CLI installed and git configured. Complete OAuth login in the terminal.');
                 } else {
                     vscode.window.showInformationMessage('GitHub setup complete on beam.');
+                }
+
+                const remember = await vscode.window.showInformationMessage(
+                    'Remember these settings for future beams?',
+                    'Yes', 'No'
+                );
+                if (remember === 'Yes') {
+                    const cfg = vscode.workspace.getConfiguration('beams');
+                    await cfg.update('github.username', username, vscode.ConfigurationTarget.Global);
+                    await cfg.update('github.email', email || `${username}@users.noreply.github.com`, vscode.ConfigurationTarget.Global);
+                    await cfg.update('github.authMethod', authChoice.method, vscode.ConfigurationTarget.Global);
+                    if (pat) {
+                        await context.secrets.store(SECRET_KEY, pat);
+                    }
+                    if (cloneRepo) {
+                        await cfg.update('github.defaultCloneRepo', cloneRepo, vscode.ConfigurationTarget.Global);
+                    }
                 }
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`GitHub setup failed: ${err instanceof Error ? err.message : err}`);
@@ -498,13 +622,316 @@ export function registerCommands(
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Export failed: ${err instanceof Error ? err.message : err}`);
             }
+        }),
+
+        vscode.commands.registerCommand('beams.refreshSessionProfiles', () => {
+            sessionProfilesProvider.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.saveSessionProfile', async (item?: BeamItem) => {
+            let beamId = item?.beam?.id;
+            if (!beamId) {
+                const beams = await listBeams();
+                if (beams.length === 0) {
+                    vscode.window.showErrorMessage('No beams available.');
+                    return;
+                }
+                const picked = await vscode.window.showQuickPick(
+                    beams.map(b => ({ label: b.id, description: b.owner ? `Owner: ${b.owner}` : undefined })),
+                    { placeHolder: 'Select a beam to save a session profile from', ignoreFocusOut: true }
+                );
+                if (!picked) {
+                    return;
+                }
+                beamId = picked.label;
+            }
+
+            const repoRoot = await detectRepoRoot(beamId);
+            if (!repoRoot) {
+                vscode.window.showErrorMessage('No git repository found on this beam under /home/beams.');
+                return;
+            }
+
+            const existing = listSessionProfiles();
+            const existingForBeam = existing.find(p => p.beamId === beamId);
+            const taskId = await vscode.window.showInputBox({
+                prompt: 'Task/profile id (used to resume this session later)',
+                placeHolder: 'fix-auth-bug',
+                value: existingForBeam?.taskId,
+                ignoreFocusOut: true,
+                validateInput: v => /^[a-z0-9][a-z0-9-_]*$/i.test(v) ? undefined : 'Use letters, numbers, - and _ only',
+            });
+            if (!taskId) {
+                return;
+            }
+
+            const existingProfile = existing.find(p => p.taskId === taskId);
+            const label = await vscode.window.showInputBox({
+                prompt: 'Short label for this profile',
+                value: existingProfile?.label ?? taskId,
+                ignoreFocusOut: true,
+            });
+            if (label === undefined) {
+                return;
+            }
+
+            let gitRef: { branch: string; sha: string };
+            let remoteUrl: string | undefined;
+            let recentActivity = '';
+            let llmSummary: string | undefined;
+            try {
+                const captured = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: 'Reading git state from beam...' },
+                    async (progress) => {
+                        const ref = await captureGitRef(beamId!, repoRoot);
+                        const url = await captureRemoteUrl(beamId!, repoRoot);
+                        const activity = await captureRecentActivity(beamId!, repoRoot);
+                        progress.report({ message: 'Asking Claude on the beam to draft the summary...' });
+                        const summary = await generateSessionSummary(beamId!, repoRoot, label);
+                        return { ref, url, activity, summary };
+                    }
+                );
+                gitRef = captured.ref;
+                remoteUrl = captured.url;
+                recentActivity = captured.activity;
+                llmSummary = captured.summary;
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to read git state: ${err instanceof Error ? err.message : err}`);
+                return;
+            }
+
+            const priorSummary = getSessionSummary(taskId);
+            let template: string;
+            if (priorSummary) {
+                template = priorSummary;
+            } else if (llmSummary) {
+                template = [`# Session Summary: ${label}`, '', llmSummary].join('\n');
+            } else {
+                template = [
+                    `# Session Summary: ${label}`,
+                    '',
+                    '## What was tried',
+                    '',
+                    '## Decisions made',
+                    '',
+                    "## What's left",
+                    '',
+                    ...(recentActivity ? ['---', '', '_Claude auto-summary unavailable — reference below, fill in manually:_', '', recentActivity, ''] : []),
+                ].join('\n');
+            }
+            const scratchDoc = await vscode.workspace.openTextDocument({ content: template, language: 'markdown' });
+            await vscode.window.showTextDocument(scratchDoc, { preview: false });
+
+            const action = await vscode.window.showInformationMessage(
+                llmSummary
+                    ? `Claude drafted a session summary for "${label}" — review/edit it in the opened editor, then click Save Profile.`
+                    : `Auto-draft failed — fill in "What was tried / Decisions made / What's left" for "${label}" in the opened editor, then click Save Profile.`,
+                'Save Profile', 'Cancel'
+            );
+            if (action !== 'Save Profile') {
+                return;
+            }
+
+            const summaryMd = scratchDoc.getText();
+            if (summaryMd.trim() === template.trim()) {
+                const proceed = await vscode.window.showWarningMessage(
+                    'The session summary still looks like the unedited template — save it as-is?',
+                    { modal: true },
+                    'Save Anyway'
+                );
+                if (proceed !== 'Save Anyway') {
+                    return;
+                }
+            }
+
+            const now = new Date().toISOString();
+            const status = await checkStatus();
+            const profile: SessionProfile = {
+                taskId,
+                label,
+                beamId,
+                repoRoot,
+                gitBranch: gitRef.branch,
+                gitCommitSha: gitRef.sha,
+                remoteUrl,
+                createdBy: status.user || os.userInfo().username,
+                createdAt: existingProfile?.createdAt ?? now,
+                updatedAt: now,
+            };
+            saveSessionProfile(profile, summaryMd);
+            sessionProfilesProvider.refresh();
+            vscode.window.showInformationMessage(
+                `Session profile "${label}" saved (${gitRef.branch}@${gitRef.sha.slice(0, 7)}).`
+            );
+        }),
+
+        vscode.commands.registerCommand('beams.viewSessionProfile', async (item?: SessionProfileItem) => {
+            if (!item?.profile) {
+                return;
+            }
+            const uri = vscode.Uri.file(getSessionSummaryPath(item.profile.taskId));
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc, { preview: true });
+        }),
+
+        vscode.commands.registerCommand('beams.resumeSessionProfile', async (item?: SessionProfileItem) => {
+            let profile = item?.profile;
+            if (!profile) {
+                const all = listSessionProfiles();
+                if (all.length === 0) {
+                    vscode.window.showInformationMessage('No saved session profiles.');
+                    return;
+                }
+                const picked = await vscode.window.showQuickPick(
+                    all.map(p => ({
+                        label: p.label,
+                        description: `${p.gitBranch}@${p.gitCommitSha.slice(0, 7)}`,
+                        detail: `Updated ${new Date(p.updatedAt).toLocaleString()}`,
+                        profile: p,
+                    })),
+                    { placeHolder: 'Select a session profile to resume', ignoreFocusOut: true }
+                );
+                if (!picked) {
+                    return;
+                }
+                profile = picked.profile;
+            }
+
+            const beams = await listBeams();
+            const target = await vscode.window.showQuickPick(
+                [
+                    { label: '$(add) Create a new beam', beamId: undefined as string | undefined },
+                    ...beams.map(b => ({ label: b.id, description: b.owner ? `Owner: ${b.owner}` : undefined, beamId: b.id })),
+                ],
+                { placeHolder: `Resume "${profile.label}" into which beam?`, ignoreFocusOut: true }
+            );
+            if (!target) {
+                return;
+            }
+
+            let beamId = target.beamId;
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Resuming session "${profile.label}"...` },
+                    async (progress) => {
+                        if (!beamId) {
+                            progress.report({ message: 'Creating beam...' });
+                            const b = await addBeam();
+                            beamId = b.id;
+                        }
+
+                        progress.report({ message: 'Locating git repository on beam...' });
+                        let repoRoot = await detectRepoRoot(beamId);
+                        if (!repoRoot) {
+                            if (!profile!.remoteUrl) {
+                                throw new Error('No git repository found on this beam, and this profile has no remote URL recorded to clone from. Clone the repo (Setup GitHub on Beam) first.');
+                            }
+                            const dirName = profile!.remoteUrl.replace(/\.git$/, '').split('/').filter(Boolean).pop() || 'project';
+                            const targetDir = `/home/beams/${dirName}`;
+
+                            progress.report({ message: 'Cloning repository...' });
+                            try {
+                                await cloneRepoOnBeam(beamId, profile!.remoteUrl, targetDir);
+                            } catch {
+                                // Likely a private repo with no credentials on this fresh beam yet —
+                                // fall back to whatever GitHub auth prefs the user already has stored.
+                                const cfg = vscode.workspace.getConfiguration('beams');
+                                const username = cfg.get<string>('github.username');
+                                const authMethod = cfg.get<string>('github.authMethod') as 'pat' | 'oauth' | 'tsh-git' | '' | undefined;
+                                if (!username || !authMethod) {
+                                    throw new Error(
+                                        `Could not clone ${profile!.remoteUrl} (likely a private repo with no GitHub credentials on this beam yet). ` +
+                                        'Run "Setup GitHub on Beam" first, then resume again.'
+                                    );
+                                }
+                                const email = cfg.get<string>('github.email') || `${username}@users.noreply.github.com`;
+                                const pat = authMethod === 'pat' ? await context.secrets.get(SECRET_KEY) : undefined;
+                                progress.report({ message: 'Applying stored GitHub credentials...' });
+                                await setupGithubOnBeam({
+                                    beamId,
+                                    username,
+                                    email,
+                                    authMethod,
+                                    pat,
+                                    cloneRepo: toOwnerRepo(profile!.remoteUrl),
+                                    cloneDir: targetDir,
+                                }, progress);
+                            }
+                            repoRoot = targetDir;
+                        }
+
+                        progress.report({ message: `Checking out ${profile!.gitBranch}...` });
+                        await applyGitRef(beamId, repoRoot, profile!.gitBranch, profile!.gitCommitSha);
+
+                        progress.report({ message: 'Loading session memory...' });
+                        await writeSessionSummaryToBeam(beamId, repoRoot, profile!.taskId, getSessionSummary(profile!.taskId));
+                    }
+                );
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to resume session: ${err instanceof Error ? err.message : err}`);
+                return;
+            }
+
+            provider.refresh();
+            const openAction = await vscode.window.showInformationMessage(
+                `Session "${profile.label}" resumed on beam "${beamId}".`,
+                'Open Session Memory File'
+            );
+            if (openAction === 'Open Session Memory File' && beamId) {
+                const repoRoot = await detectRepoRoot(beamId) ?? profile.repoRoot;
+                const uri = vscode.Uri.parse(`beam://${beamId}${repoRoot}/.claude/session-memory/${profile.taskId}.md`);
+                const doc = await vscode.workspace.openTextDocument(uri);
+                await vscode.window.showTextDocument(doc);
+            }
+        }),
+
+        vscode.commands.registerCommand('beams.deleteSessionProfile', async (item?: SessionProfileItem) => {
+            let profile = item?.profile;
+            if (!profile) {
+                const all = listSessionProfiles();
+                if (all.length === 0) {
+                    vscode.window.showInformationMessage('No saved session profiles.');
+                    return;
+                }
+                const picked = await vscode.window.showQuickPick(
+                    all.map(p => ({ label: p.label, taskId: p.taskId })),
+                    { placeHolder: 'Select a session profile to delete', ignoreFocusOut: true }
+                );
+                if (!picked) {
+                    return;
+                }
+                profile = all.find(p => p.taskId === picked.taskId);
+            }
+            if (!profile) {
+                return;
+            }
+
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete session profile "${profile.label}"?`,
+                { modal: true },
+                'Delete'
+            );
+            if (confirm !== 'Delete') {
+                return;
+            }
+            deleteSessionProfile(profile.taskId);
+            sessionProfilesProvider.refresh();
+            vscode.window.showInformationMessage(`Session profile "${profile.label}" deleted.`);
         })
     );
 }
 
-async function captureBeamConfig(beamId: string): Promise<string[]> {
-    const commands: string[] = ['mkdir -p /home/beams/project'];
+interface CapturedConfig {
+    commands: string[];
+    github?: import('./templates').TemplateGithub;
+    envSnapshot?: import('./templates').TemplateEnvSnapshot;
+}
 
+async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
+    const commands: string[] = ['mkdir -p /home/beams/project'];
+    const envSnapshot: import('./templates').TemplateEnvSnapshot = {};
+
+    // Packages: pip
     try {
         const pipOutput = await execOnBeam(beamId, ['bash', '-c', 'pip freeze 2>/dev/null || true']);
         const packages = pipOutput.trim().split('\n').filter(l => l && !l.startsWith('#'));
@@ -514,6 +941,7 @@ async function captureBeamConfig(beamId: string): Promise<string[]> {
         }
     } catch { /* no pip */ }
 
+    // Packages: npm global
     try {
         const npmGlobal = await execOnBeam(beamId, ['bash', '-c', 'npm list -g --depth=0 --json 2>/dev/null || true']);
         const parsed = JSON.parse(npmGlobal);
@@ -523,6 +951,7 @@ async function captureBeamConfig(beamId: string): Promise<string[]> {
         }
     } catch { /* no npm or parse error */ }
 
+    // Packages: apt
     try {
         const aptOutput = await execOnBeam(beamId, ['bash', '-c', "apt-mark showmanual 2>/dev/null | grep -v -E '^(base-files|bash|coreutils|dpkg|apt)' || true"]);
         const aptPkgs = aptOutput.trim().split('\n').filter(Boolean);
@@ -531,6 +960,79 @@ async function captureBeamConfig(beamId: string): Promise<string[]> {
         }
     } catch { /* no apt */ }
 
-    return commands;
+    // Git config
+    try {
+        const gitOutput = await execOnBeam(beamId, ['bash', '-c', 'git config --global --list 2>/dev/null || true']);
+        const entries = gitOutput.trim().split('\n')
+            .filter(l => l.includes('='))
+            .map(l => { const [k, ...v] = l.split('='); return { key: k, value: v.join('=') }; });
+        if (entries.length > 0) {
+            envSnapshot.gitConfig = entries;
+            for (const { key, value } of entries) {
+                commands.push(`git config --global "${key}" "${value}"`);
+            }
+        }
+    } catch { /* no git */ }
+
+    // Environment variables from .profile/.bashrc
+    try {
+        const envOutput = await execOnBeam(beamId, ['bash', '-c',
+            'grep -h "^export " ~/.profile ~/.bashrc 2>/dev/null | sort -u || true']);
+        const exports = envOutput.trim().split('\n').filter(Boolean);
+        if (exports.length > 0) {
+            envSnapshot.envVars = exports;
+            for (const line of exports) {
+                commands.push(`grep -qxF '${line}' ~/.bashrc 2>/dev/null || echo '${line}' >> ~/.bashrc`);
+            }
+        }
+    } catch { /* ignore */ }
+
+    // Custom scripts in ~/bin
+    try {
+        const binLs = await execOnBeam(beamId, ['bash', '-c', 'ls ~/bin 2>/dev/null || true']);
+        const scripts = binLs.trim().split('\n').filter(Boolean);
+        if (scripts.length > 0) {
+            const binTar = await execOnBeam(beamId, ['bash', '-c',
+                'tar -czf - -C ~ bin 2>/dev/null | base64 -w0'], 30000);
+            if (binTar.trim() && binTar.trim().length < 5 * 1024 * 1024) {
+                envSnapshot.binScriptsTar = binTar.trim();
+                commands.push('mkdir -p ~/bin');
+                commands.push(`echo "${binTar.trim()}" | base64 -d | tar -xzf - -C ~`);
+                commands.push('chmod +x ~/bin/*');
+            }
+        }
+    } catch { /* no ~/bin */ }
+
+    // Systemd user services
+    try {
+        const units = await execOnBeam(beamId, ['bash', '-c',
+            'systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk "{print \\$1}" || true']);
+        const services = units.trim().split('\n').filter(Boolean);
+        if (services.length > 0) {
+            const unitEntries: Array<{ name: string; content: string }> = [];
+            for (const svc of services) {
+                try {
+                    const content = await execOnBeam(beamId, ['bash', '-c',
+                        `cat ~/.config/systemd/user/${svc} 2>/dev/null || true`]);
+                    if (content.trim()) {
+                        unitEntries.push({ name: svc, content: content.trim() });
+                        const escaped = content.trim().replace(/'/g, "'\\''");
+                        commands.push(`mkdir -p ~/.config/systemd/user`);
+                        commands.push(`cat > ~/.config/systemd/user/${svc} << 'UNIT_EOF'\n${escaped}\nUNIT_EOF`);
+                        commands.push(`systemctl --user enable ${svc}`);
+                    }
+                } catch { /* skip this unit */ }
+            }
+            if (unitEntries.length > 0) {
+                envSnapshot.systemdUnits = unitEntries;
+            }
+        }
+    } catch { /* no systemd user */ }
+
+    const hasSnapshot = envSnapshot.gitConfig || envSnapshot.envVars || envSnapshot.binScriptsTar || envSnapshot.systemdUnits;
+    return {
+        commands,
+        envSnapshot: hasSnapshot ? envSnapshot : undefined,
+    };
 }
 

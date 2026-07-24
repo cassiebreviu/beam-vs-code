@@ -87,7 +87,8 @@
       { "command": "beams.resumeSessionProfile", "title": "Resume Session Profile", "icon": "$(play-circle)", "category": "Beams" },
       { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
       { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
-      { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" }
+      { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.createSetupProfile", "title": "New Setup Profile", "icon": "$(add)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
@@ -95,6 +96,7 @@
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" },
+        { "command": "beams.createSetupProfile", "when": "view == beamSessionProfiles", "group": "navigation" },
         { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles", "group": "navigation" },
         { "command": "beams.refreshSessionProfiles", "when": "view == beamSessionProfiles", "group": "navigation" }
       ],

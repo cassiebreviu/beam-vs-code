@@ -3,17 +3,27 @@ import * as path from 'path';
 import * as os from 'os';
 import { execOnBeam } from './tsh';
 
+// A profile is either (or both):
+// - a resumable work session: repoRoot/gitBranch/gitCommitSha/remoteUrl capture where you left off
+// - an environment setup profile: `setup` describes commands to provision a beam (e.g. installing
+//   dev tooling), with no git state of its own — applied via the same "resume" action.
+export interface SessionProfileSetup {
+    commands: string[];
+    autoPublish?: boolean;
+}
+
 export interface SessionProfile {
     taskId: string;
     label: string;
     beamId: string;
-    repoRoot: string;
-    gitBranch: string;
-    gitCommitSha: string;
+    repoRoot?: string;
+    gitBranch?: string;
+    gitCommitSha?: string;
     remoteUrl?: string;
     createdBy: string;
     createdAt: string;
     updatedAt: string;
+    setup?: SessionProfileSetup;
 }
 
 function getProfilesRoot(): string {
@@ -64,6 +74,9 @@ function fromRfdShape(raw: RawProfile): SessionProfile {
 // (lowercased, punctuation-stripped) key, so "task_id", "taskId", and "git.branch" /
 // "gitBranch" all resolve the same way.
 const FIELD_ALIASES: Record<keyof SessionProfile, string[]> = {
+    // `setup` is a structured object, not a string leaf — dynamic matching only ever
+    // produces string fields; setup profiles are always created explicitly instead.
+    setup: [],
     taskId: ['taskid', 'id'],
     label: ['label', 'name', 'title'],
     beamId: ['beamid'],
@@ -94,6 +107,16 @@ function flattenLeaves(obj: unknown, out: Map<string, unknown> = new Map()): Map
     return out;
 }
 
+function parseSetup(raw: unknown): SessionProfileSetup | undefined {
+    if (raw === null || typeof raw !== 'object') return undefined;
+    const commands = (raw as RawProfile).commands;
+    if (!Array.isArray(commands) || !commands.every(c => typeof c === 'string') || commands.length === 0) {
+        return undefined;
+    }
+    const autoPublish = (raw as RawProfile).autoPublish;
+    return { commands, autoPublish: autoPublish === true };
+}
+
 function fromDynamicMatch(raw: RawProfile): SessionProfile {
     const leaves = flattenLeaves(raw);
     const pick = (aliases: string[]): string => {
@@ -108,17 +131,21 @@ function fromDynamicMatch(raw: RawProfile): SessionProfile {
 
     const taskId = pick(FIELD_ALIASES.taskId);
     const remoteUrl = pick(FIELD_ALIASES.remoteUrl);
+    // `setup` is a structured object, not a string leaf — flattenLeaves() only collects
+    // leaves, so it's read directly off the raw object instead of via pick().
+    const setup = parseSetup(raw.setup);
     return {
         taskId,
         label: pick(FIELD_ALIASES.label) || taskId,
         beamId: pick(FIELD_ALIASES.beamId),
-        repoRoot: pick(FIELD_ALIASES.repoRoot),
-        gitBranch: pick(FIELD_ALIASES.gitBranch),
-        gitCommitSha: pick(FIELD_ALIASES.gitCommitSha),
+        repoRoot: pick(FIELD_ALIASES.repoRoot) || undefined,
+        gitBranch: pick(FIELD_ALIASES.gitBranch) || undefined,
+        gitCommitSha: pick(FIELD_ALIASES.gitCommitSha) || undefined,
         remoteUrl: remoteUrl ? toRemoteUrl(remoteUrl) : undefined,
         createdBy: pick(FIELD_ALIASES.createdBy),
         createdAt: pick(FIELD_ALIASES.createdAt),
         updatedAt: pick(FIELD_ALIASES.updatedAt) || pick(FIELD_ALIASES.createdAt),
+        ...(setup ? { setup } : {}),
     };
 }
 

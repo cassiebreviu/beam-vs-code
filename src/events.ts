@@ -116,7 +116,6 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
-                'bash', '-c',
                 'find /home/beams/.claude/projects -name "*.jsonl" -not -path "*/subagents/*" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-; ' +
                 'find /home/beams/.claude -maxdepth 1 -name "*.jsonl" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-'
             ]);

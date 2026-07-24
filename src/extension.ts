@@ -38,6 +38,7 @@ export function activate(context: vscode.ExtensionContext): void {
         },
     });
     poller.addConsumer(decorationProvider);
+    poller.addConsumer(fileExplorer);
 
     vscode.window.createTreeView('beamClusters', {
         treeDataProvider: clustersProvider,

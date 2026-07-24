@@ -102,7 +102,7 @@ export class BeamPoller implements vscode.Disposable {
 
         try {
             const output = await execOnBeam(this.currentBeamId, [
-                'bash', '-c', 'find /home/beams -maxdepth 2 -name .git -type d -print -quit',
+                'find /home/beams -maxdepth 2 -name .git -type d -print -quit',
             ], 10000);
             const gitDir = output.trim();
             if (gitDir) {
@@ -147,7 +147,7 @@ export class BeamPoller implements vscode.Disposable {
         this.gitBusy = true;
         try {
             const output = await execOnBeam(this.currentBeamId, [
-                'bash', '-c', `cd "${this.repoRoot}" && git rev-parse HEAD 2>/dev/null && echo "---SEP---" && git status --porcelain=v1 2>/dev/null`,
+                `cd "${this.repoRoot}" && git rev-parse HEAD 2>/dev/null && echo "---SEP---" && git status --porcelain=v1 2>/dev/null`,
             ], 15000);
 
             const sepIdx = output.indexOf('---SEP---');
@@ -174,7 +174,7 @@ export class BeamPoller implements vscode.Disposable {
         try {
             const files = [...this.trackedFiles];
             const output = await execOnBeam(this.currentBeamId, [
-                'bash', '-c', `stat --format='%n %Y' ${files.map(f => `"${f}"`).join(' ')} 2>/dev/null || true`,
+                `stat --format='%n %Y' ${files.map(f => `"${f}"`).join(' ')} 2>/dev/null || true`,
             ], 10000);
 
             const stats = new Map<string, number>();

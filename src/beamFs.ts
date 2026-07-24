@@ -151,7 +151,7 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
         const { beamId, remotePath } = this.parseUri(uri);
         const encoded = Buffer.from(content).toString('base64');
         await execOnBeam(beamId, [
-            'bash', '-c', `echo '${encoded}' | base64 -d > '${remotePath}'`
+            `echo '${encoded}' | base64 -d > ${shellQuote(remotePath)}`
         ]);
         const key = `${beamId}:${remotePath}`;
         // Update mtime cache to suppress false-positive change events from our own write

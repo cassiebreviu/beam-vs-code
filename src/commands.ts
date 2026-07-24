@@ -141,7 +141,7 @@ export function registerCommands(
                         if (picked.template.commands.length > 0) {
                             progress.report({ message: 'Running template setup...' });
                             for (const cmd of picked.template.commands) {
-                                await execOnBeam(b.id, ['bash', '-c', cmd]);
+                                await execOnBeam(b.id, [cmd]);
                             }
                         }
                         try {
@@ -317,11 +317,15 @@ export function registerCommands(
             openBeamTerminal(item.beam);
         }),
 
-        vscode.commands.registerCommand('beams.openFiles', (item: BeamItem) => {
+        vscode.commands.registerCommand('beams.openFiles', async (item: BeamItem) => {
             if (!item?.beam) {
                 return;
             }
             fileExplorer.setBeam(item.beam);
+            if (poller) {
+                await poller.setBeam(item.beam.id);
+                vscode.commands.executeCommand('beams.selectScm');
+            }
             vscode.commands.executeCommand('beamFiles.focus');
         }),
 
@@ -529,7 +533,7 @@ export function registerCommands(
             const terminal = vscode.window.createTerminal({
                 name: `Run: ${beamId}`,
                 shellPath: 'tsh',
-                shellArgs: ['beams', 'exec', beamId, '--', 'bash', '-c', command],
+                shellArgs: ['beams', 'exec', beamId, '--', command],
                 iconPath: new vscode.ThemeIcon('play'),
             });
             terminal.show();
@@ -933,7 +937,7 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Packages: pip
     try {
-        const pipOutput = await execOnBeam(beamId, ['bash', '-c', 'pip freeze 2>/dev/null || true']);
+        const pipOutput = await execOnBeam(beamId, ['pip freeze 2>/dev/null || true']);
         const packages = pipOutput.trim().split('\n').filter(l => l && !l.startsWith('#'));
         if (packages.length > 0) {
             commands.push('python3 -m venv /home/beams/project/.venv');
@@ -943,7 +947,7 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Packages: npm global
     try {
-        const npmGlobal = await execOnBeam(beamId, ['bash', '-c', 'npm list -g --depth=0 --json 2>/dev/null || true']);
+        const npmGlobal = await execOnBeam(beamId, ['npm list -g --depth=0 --json 2>/dev/null || true']);
         const parsed = JSON.parse(npmGlobal);
         const deps = Object.keys(parsed.dependencies ?? {}).filter(d => d !== 'npm');
         if (deps.length > 0) {
@@ -953,7 +957,7 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Packages: apt
     try {
-        const aptOutput = await execOnBeam(beamId, ['bash', '-c', "apt-mark showmanual 2>/dev/null | grep -v -E '^(base-files|bash|coreutils|dpkg|apt)' || true"]);
+        const aptOutput = await execOnBeam(beamId, ["apt-mark showmanual 2>/dev/null | grep -v -E '^(base-files|bash|coreutils|dpkg|apt)' || true"]);
         const aptPkgs = aptOutput.trim().split('\n').filter(Boolean);
         if (aptPkgs.length > 0) {
             commands.push(`apt-get install -y ${aptPkgs.join(' ')}`);
@@ -962,7 +966,7 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Git config
     try {
-        const gitOutput = await execOnBeam(beamId, ['bash', '-c', 'git config --global --list 2>/dev/null || true']);
+        const gitOutput = await execOnBeam(beamId, ['git config --global --list 2>/dev/null || true']);
         const entries = gitOutput.trim().split('\n')
             .filter(l => l.includes('='))
             .map(l => { const [k, ...v] = l.split('='); return { key: k, value: v.join('=') }; });
@@ -976,7 +980,7 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Environment variables from .profile/.bashrc
     try {
-        const envOutput = await execOnBeam(beamId, ['bash', '-c',
+        const envOutput = await execOnBeam(beamId, [
             'grep -h "^export " ~/.profile ~/.bashrc 2>/dev/null | sort -u || true']);
         const exports = envOutput.trim().split('\n').filter(Boolean);
         if (exports.length > 0) {
@@ -989,10 +993,10 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Custom scripts in ~/bin
     try {
-        const binLs = await execOnBeam(beamId, ['bash', '-c', 'ls ~/bin 2>/dev/null || true']);
+        const binLs = await execOnBeam(beamId, ['ls ~/bin 2>/dev/null || true']);
         const scripts = binLs.trim().split('\n').filter(Boolean);
         if (scripts.length > 0) {
-            const binTar = await execOnBeam(beamId, ['bash', '-c',
+            const binTar = await execOnBeam(beamId, [
                 'tar -czf - -C ~ bin 2>/dev/null | base64 -w0'], 30000);
             if (binTar.trim() && binTar.trim().length < 5 * 1024 * 1024) {
                 envSnapshot.binScriptsTar = binTar.trim();
@@ -1005,14 +1009,14 @@ async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
 
     // Systemd user services
     try {
-        const units = await execOnBeam(beamId, ['bash', '-c',
+        const units = await execOnBeam(beamId, [
             'systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk "{print \\$1}" || true']);
         const services = units.trim().split('\n').filter(Boolean);
         if (services.length > 0) {
             const unitEntries: Array<{ name: string; content: string }> = [];
             for (const svc of services) {
                 try {
-                    const content = await execOnBeam(beamId, ['bash', '-c',
+                    const content = await execOnBeam(beamId, [
                         `cat ~/.config/systemd/user/${svc} 2>/dev/null || true`]);
                     if (content.trim()) {
                         unitEntries.push({ name: svc, content: content.trim() });

@@ -23,6 +23,7 @@ export interface BeamTemplate {
     custom?: boolean;
     github?: TemplateGithub;
     envSnapshot?: TemplateEnvSnapshot;
+    autoPublish?: boolean;
 }
 
 export const builtinTemplates: BeamTemplate[] = [
@@ -63,10 +64,11 @@ export async function saveCustomTemplate(template: BeamTemplate): Promise<void> 
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
-    const custom = getCustomTemplates().map(({ label, description, commands, github, envSnapshot }) => {
+    const custom = getCustomTemplates().map(({ label, description, commands, github, envSnapshot, autoPublish }) => {
         const t: Record<string, unknown> = { label, description, commands };
         if (github) t.github = github;
         if (envSnapshot) t.envSnapshot = envSnapshot;
+        if (autoPublish) t.autoPublish = autoPublish;
         return t;
     });
     const entry: Record<string, unknown> = {
@@ -76,6 +78,7 @@ export async function saveCustomTemplate(template: BeamTemplate): Promise<void> 
     };
     if (template.github) entry.github = template.github;
     if (template.envSnapshot) entry.envSnapshot = template.envSnapshot;
+    if (template.autoPublish) entry.autoPublish = template.autoPublish;
     custom.push(entry);
     fs.writeFileSync(filePath, JSON.stringify(custom, null, 2), 'utf-8');
 }
@@ -84,10 +87,11 @@ export async function deleteCustomTemplate(label: string): Promise<void> {
     const filePath = getTemplatesPath();
     const custom = getCustomTemplates()
         .filter(t => t.label !== label)
-        .map(({ label, description, commands, github, envSnapshot }) => {
+        .map(({ label, description, commands, github, envSnapshot, autoPublish }) => {
             const t: Record<string, unknown> = { label, description, commands };
             if (github) t.github = github;
             if (envSnapshot) t.envSnapshot = envSnapshot;
+            if (autoPublish) t.autoPublish = autoPublish;
             return t;
         });
     const dir = path.dirname(filePath);

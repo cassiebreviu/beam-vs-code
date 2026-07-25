@@ -57,6 +57,7 @@ export async function setupGithubOnBeam(
     progress.report({ message: 'Configuring git identity...' });
     await execOnBeam(beamId, ['git', 'config', '--global', 'user.name', username], timeout);
     await execOnBeam(beamId, ['git', 'config', '--global', 'user.email', email], timeout);
+    await execOnBeam(beamId, ['git', 'config', '--global', 'pager.branch', 'false'], timeout);
 
     if (authMethod === 'tsh-git') {
         // tsh git config update is a per-repo command; run it after cloning, not here
@@ -110,7 +111,7 @@ export async function setupGithubOnBeam(
 
 export async function isTshGitAvailable(beamId: string): Promise<boolean> {
     try {
-        await execOnBeam(beamId, ['bash', '-c', 'tsh git config update'], 10000);
+        await execOnBeam(beamId, ['tsh', 'git', 'config', 'update'], 10000);
         return true;
     } catch {
         return false;

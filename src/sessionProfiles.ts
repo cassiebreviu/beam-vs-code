@@ -3,17 +3,27 @@ import * as path from 'path';
 import * as os from 'os';
 import { execOnBeam } from './tsh';
 
+// A profile is either (or both):
+// - a resumable work session: repoRoot/gitBranch/gitCommitSha/remoteUrl capture where you left off
+// - an environment setup profile: `setup` describes commands to provision a beam (e.g. installing
+//   dev tooling), with no git state of its own — applied via the same "resume" action.
+export interface SessionProfileSetup {
+    commands: string[];
+    autoPublish?: boolean;
+}
+
 export interface SessionProfile {
     taskId: string;
     label: string;
     beamId: string;
-    repoRoot: string;
-    gitBranch: string;
-    gitCommitSha: string;
+    repoRoot?: string;
+    gitBranch?: string;
+    gitCommitSha?: string;
     remoteUrl?: string;
     createdBy: string;
     createdAt: string;
     updatedAt: string;
+    setup?: SessionProfileSetup;
 }
 
 function getProfilesRoot(): string {
@@ -22,6 +32,127 @@ function getProfilesRoot(): string {
 
 function getProfileDir(taskId: string): string {
     return path.join(getProfilesRoot(), taskId);
+}
+
+type RawProfile = Record<string, unknown>;
+
+// "owner/repo" shorthand -> full https clone URL; leave anything already URL-shaped alone.
+function toRemoteUrl(repo: string): string {
+    return /^[\w.-]+\/[\w.-]+$/.test(repo) ? `https://github.com/${repo}.git` : repo;
+}
+
+// The RFD "Beams Task Profile" schema (schema_version: 1) that the real save-session/
+// resume-session workflow produces, e.g.:
+// { schema_version, task_id, tenant_id, user_id, created_at, updated_at,
+//   git: { repo, branch, commit_sha }, summary_object, scan: {...} }
+// This is now the default shape we expect on disk.
+function isRfdProfileShape(raw: RawProfile): boolean {
+    return typeof raw.task_id === 'string' && typeof raw.git === 'object' && raw.git !== null;
+}
+
+function fromRfdShape(raw: RawProfile): SessionProfile {
+    const git = (raw.git ?? {}) as RawProfile;
+    const taskId = String(raw.task_id);
+    const repo = typeof git.repo === 'string' ? git.repo : undefined;
+    return {
+        taskId,
+        label: typeof raw.label === 'string' ? raw.label : taskId,
+        beamId: typeof raw.beam_id === 'string' ? raw.beam_id : '',
+        repoRoot: typeof raw.repo_root === 'string' ? raw.repo_root : '',
+        gitBranch: String(git.branch ?? ''),
+        gitCommitSha: String(git.commit_sha ?? ''),
+        remoteUrl: repo ? toRemoteUrl(repo) : undefined,
+        createdBy: String(raw.user_id ?? ''),
+        createdAt: String(raw.created_at ?? ''),
+        updatedAt: String(raw.updated_at ?? raw.created_at ?? ''),
+    };
+}
+
+// Best-effort fallback for anything that isn't the RFD shape above (including this
+// prototype's own legacy flat/camelCase profile.json) — flattens every leaf value in the
+// JSON (regardless of nesting) and matches it against known field names by normalized
+// (lowercased, punctuation-stripped) key, so "task_id", "taskId", and "git.branch" /
+// "gitBranch" all resolve the same way.
+const FIELD_ALIASES: Record<keyof SessionProfile, string[]> = {
+    // `setup` is a structured object, not a string leaf — dynamic matching only ever
+    // produces string fields; setup profiles are always created explicitly instead.
+    setup: [],
+    taskId: ['taskid', 'id'],
+    label: ['label', 'name', 'title'],
+    beamId: ['beamid'],
+    repoRoot: ['reporoot', 'root'],
+    gitBranch: ['gitbranch', 'branch'],
+    gitCommitSha: ['gitcommitsha', 'commitsha', 'sha'],
+    remoteUrl: ['remoteurl', 'repo', 'repourl'],
+    createdBy: ['createdby', 'userid', 'author'],
+    createdAt: ['createdat'],
+    updatedAt: ['updatedat'],
+};
+
+function normalizeKey(key: string): string {
+    return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function flattenLeaves(obj: unknown, out: Map<string, unknown> = new Map()): Map<string, unknown> {
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+        return out;
+    }
+    for (const [key, value] of Object.entries(obj as RawProfile)) {
+        if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+            flattenLeaves(value, out);
+        } else if (!out.has(normalizeKey(key))) {
+            out.set(normalizeKey(key), value);
+        }
+    }
+    return out;
+}
+
+function parseSetup(raw: unknown): SessionProfileSetup | undefined {
+    if (raw === null || typeof raw !== 'object') return undefined;
+    const commands = (raw as RawProfile).commands;
+    if (!Array.isArray(commands) || !commands.every(c => typeof c === 'string') || commands.length === 0) {
+        return undefined;
+    }
+    const autoPublish = (raw as RawProfile).autoPublish;
+    return { commands, autoPublish: autoPublish === true };
+}
+
+function fromDynamicMatch(raw: RawProfile): SessionProfile {
+    const leaves = flattenLeaves(raw);
+    const pick = (aliases: string[]): string => {
+        for (const alias of aliases) {
+            const value = leaves.get(alias);
+            if (typeof value === 'string' && value) {
+                return value;
+            }
+        }
+        return '';
+    };
+
+    const taskId = pick(FIELD_ALIASES.taskId);
+    const remoteUrl = pick(FIELD_ALIASES.remoteUrl);
+    // `setup` is a structured object, not a string leaf — flattenLeaves() only collects
+    // leaves, so it's read directly off the raw object instead of via pick().
+    const setup = parseSetup(raw.setup);
+    return {
+        taskId,
+        label: pick(FIELD_ALIASES.label) || taskId,
+        beamId: pick(FIELD_ALIASES.beamId),
+        repoRoot: pick(FIELD_ALIASES.repoRoot) || undefined,
+        gitBranch: pick(FIELD_ALIASES.gitBranch) || undefined,
+        gitCommitSha: pick(FIELD_ALIASES.gitCommitSha) || undefined,
+        remoteUrl: remoteUrl ? toRemoteUrl(remoteUrl) : undefined,
+        createdBy: pick(FIELD_ALIASES.createdBy),
+        createdAt: pick(FIELD_ALIASES.createdAt),
+        updatedAt: pick(FIELD_ALIASES.updatedAt) || pick(FIELD_ALIASES.createdAt),
+        ...(setup ? { setup } : {}),
+    };
+}
+
+function parseSessionProfileJson(text: string): SessionProfile | undefined {
+    const raw = JSON.parse(text) as RawProfile;
+    const profile = isRfdProfileShape(raw) ? fromRfdShape(raw) : fromDynamicMatch(raw);
+    return profile.taskId ? profile : undefined;
 }
 
 export function listSessionProfiles(): SessionProfile[] {
@@ -34,7 +165,10 @@ export function listSessionProfiles(): SessionProfile[] {
         const file = path.join(root, taskId, 'profile.json');
         if (!fs.existsSync(file)) continue;
         try {
-            profiles.push(JSON.parse(fs.readFileSync(file, 'utf-8')));
+            const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
+            if (profile) {
+                profiles.push(profile);
+            }
         } catch { /* skip corrupt profile */ }
     }
     profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
@@ -47,7 +181,7 @@ export function getSessionProfile(taskId: string): SessionProfile | undefined {
         return undefined;
     }
     try {
-        return JSON.parse(fs.readFileSync(file, 'utf-8'));
+        return parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
     } catch {
         return undefined;
     }

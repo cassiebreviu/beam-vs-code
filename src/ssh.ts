@@ -59,10 +59,16 @@ function writeSshConfig(content: string): void {
     }
 }
 
-async function getTshConfig(): Promise<string | null> {
+// `tsh config` with no --proxy targets whatever cluster happens to be tsh's current
+// default profile — not necessarily the one we're configuring here, especially when
+// logged into multiple clusters. Passing --proxy pins it to the right one, including
+// the IdentityFile/CertificateFile lines that scope SSH auth to that cluster's own
+// certificate (without them, ssh falls back to offering every cert in the agent, which
+// can exhaust the server's MaxAuthTries before ever trying the right one).
+async function getTshConfig(cluster: string): Promise<string | null> {
     try {
         const tshPath = getTshPath();
-        const { stdout } = await exec(tshPath, ['config'], { timeout: 10000 });
+        const { stdout } = await exec(tshPath, ['config', '--proxy', cluster], { timeout: 10000 });
         return stdout;
     } catch {
         return null;
@@ -106,6 +112,28 @@ function patchTshConfigForBeams(tshConfig: string, cluster: string): string {
     }
 
     return result.join('\n');
+}
+
+/**
+ * Builds the wildcard ProxyCommand block for a cluster, preferring `tsh config --proxy`
+ * (which includes IdentityFile/CertificateFile pinning so ssh doesn't have to guess which
+ * of the user's other logged-in clusters' certs to offer — without it, ssh falls back to
+ * offering every cert in the agent, which can exhaust the server's MaxAuthTries before
+ * ever trying the right one) and falling back to a minimal hardcoded ProxyCommand-only
+ * block if tsh is unavailable or not logged into that cluster.
+ */
+async function buildWildcardBlock(cluster: string): Promise<string> {
+    const tshConfig = await getTshConfig(cluster);
+    if (tshConfig && tshConfig.includes(`*.${cluster}`)) {
+        return patchTshConfigForBeams(tshConfig, cluster);
+    }
+    const tshPath = getTshPath();
+    return [
+        `Host *.${cluster} !${cluster}`,
+        '    StrictHostKeyChecking no',
+        '    UserKnownHostsFile /dev/null',
+        `    ProxyCommand sh -c '"${tshPath}" proxy ssh --cluster=${cluster} --proxy=${cluster}:443 %r@teleport.internal/beams/alias=$(echo %h | cut -d. -f1)'`,
+    ].join('\n');
 }
 
 function hasHost(config: string, host: string): boolean {
@@ -236,47 +264,51 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
         return host;
     }
 
-    // No existing tsh config — try to generate it
+    // No existing tsh config — generate it
     if (!config.includes(MARKER_START)) {
-        const tshConfig = await getTshConfig();
-        if (tshConfig) {
-            const patched = patchTshConfigForBeams(tshConfig, cluster);
-            const block = [
-                MARKER_START,
-                `Host ${host}`,
-                `    HostName ${beamId}.${cluster}`,
-                '    User beams',
-                '    UserKnownHostsFile /dev/null',
-                '    RemoteCommand bash',
-                '',
-                patched,
-                MARKER_END,
-            ].join('\n');
-            if (config.length > 0 && !config.endsWith('\n')) {
-                config += '\n';
-            }
-            config += '\n' + block + '\n';
-            writeSshConfig(config);
-            return host;
+        const wildcardBlock = await buildWildcardBlock(cluster);
+        const block = [
+            MARKER_START,
+            `Host ${host}`,
+            `    HostName ${beamId}.${cluster}`,
+            '    User beams',
+            '    UserKnownHostsFile /dev/null',
+            '    RemoteCommand bash',
+            '',
+            wildcardBlock,
+            MARKER_END,
+        ].join('\n');
+        if (config.length > 0 && !config.endsWith('\n')) {
+            config += '\n';
         }
+        config += '\n' + block + '\n';
+        writeSshConfig(config);
+        return host;
     }
 
-    // Fallback: write standalone block (no tsh config available)
+    // Fallback: a Teleport Beams marker block already exists — but possibly only for a
+    // different cluster. Always add this beam's Host entry, and if THIS cluster doesn't
+    // already have its own wildcard ProxyCommand somewhere in the config, add that too;
+    // otherwise the new entry has no ProxyCommand and falls through to a raw, unproxied
+    // TCP connection attempt.
     const markerIdx = config.indexOf(MARKER_START);
     if (markerIdx !== -1) {
         const endIdx = config.indexOf(MARKER_END);
         if (endIdx !== -1) {
             const before = config.slice(0, endIdx);
             const after = config.slice(endIdx);
-            const newEntry = [
+            const entries = [
                 '',
                 `Host ${host}`,
                 `    HostName ${beamId}.${cluster}`,
                 '    User beams',
                 '    UserKnownHostsFile /dev/null',
                 '    RemoteCommand bash',
-            ].join('\n');
-            config = before + newEntry + '\n' + after;
+            ];
+            if (!hasHost(config, `*.${cluster}`)) {
+                entries.push('', await buildWildcardBlock(cluster));
+            }
+            config = before + entries.join('\n') + '\n' + after;
             writeSshConfig(config);
             return host;
         }

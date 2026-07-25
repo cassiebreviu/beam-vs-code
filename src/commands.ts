@@ -309,12 +309,25 @@ export function registerCommands(
                     vscode.window.showErrorMessage('Not logged in to Teleport. Use "Beams: Login" first.');
                     return;
                 }
+
+                const detectedRoot = await detectRepoRoot(item.beam.id);
+                let folder = await vscode.window.showInputBox({
+                    prompt: 'Directory to open as the workspace root (e.g. the repo root, so Source Control diffs/commits are scoped correctly)',
+                    value: detectedRoot ?? '/home/beams',
+                    ignoreFocusOut: true,
+                    validateInput: v => v.startsWith('/') ? undefined : 'Must be an absolute path (starting with /)',
+                });
+                if (!folder) {
+                    return;
+                }
+                folder = folder.replace(/\/+$/, '') || '/';
+
                 const host = await ensureBeamSshConfig(item.beam.id, status.cluster);
                 const config = vscode.workspace.getConfiguration('remote.SSH');
                 if (config.inspect<boolean>('enableRemoteCommand') && !config.get<boolean>('enableRemoteCommand')) {
                     await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);
                 }
-                const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}/home/beams`);
+                const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}${folder}`);
                 await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to connect: ${err instanceof Error ? err.message : err}`);

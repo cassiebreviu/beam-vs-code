@@ -12,6 +12,7 @@ import { BeamGitOriginalProvider } from './gitOriginal';
 import { BeamGitDecorationProvider } from './fileDecorations';
 import { BeamGitScmProvider } from './scm';
 import { registerScmCommands } from './scmCommands';
+import { ContainerSyncEngine } from './containerSync';
 
 export function activate(context: vscode.ExtensionContext): void {
     const provider = new BeamsProvider();
@@ -39,6 +40,9 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     poller.addConsumer(decorationProvider);
     poller.addConsumer(fileExplorer);
+
+    const containerSyncEngine = new ContainerSyncEngine();
+    poller.addConsumer(containerSyncEngine);
 
     vscode.window.createTreeView('beamClusters', {
         treeDataProvider: clustersProvider,
@@ -95,7 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider, sessionProfilesProvider, poller, () => scmProvider);
+    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider, sessionProfilesProvider, poller, () => scmProvider, containerSyncEngine);
     registerScmCommands(context, () => scmProvider, () => poller);
 
     // Hook beam selection to start SCM integration
@@ -119,6 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push({ dispose: () => poller.dispose() });
     context.subscriptions.push({ dispose: () => scmProvider?.dispose() });
     context.subscriptions.push({ dispose: () => decorationProvider.dispose() });
+    context.subscriptions.push({ dispose: () => containerSyncEngine.dispose() });
 }
 
 export function deactivate(): void {}

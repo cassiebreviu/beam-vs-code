@@ -88,7 +88,11 @@
       { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
       { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
       { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" },
-      { "command": "beams.createSetupProfile", "title": "New Setup Profile", "icon": "$(add)", "category": "Beams" }
+      { "command": "beams.createSetupProfile", "title": "New Setup Profile", "icon": "$(add)", "category": "Beams" },
+      { "command": "beams.container.open", "title": "Open Local Debug Container", "icon": "$(debug-console)", "category": "Beams" },
+      { "command": "beams.container.syncNow", "title": "Sync Local Debug Container Now", "icon": "$(sync)", "category": "Beams" },
+      { "command": "beams.container.rebuild", "title": "Rebuild Local Debug Container Image", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.container.teardown", "title": "Delete Local Debug Container", "icon": "$(trash)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
@@ -112,7 +116,11 @@
         { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveSessionProfile", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.container.open", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
+        { "command": "beams.container.syncNow", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
+        { "command": "beams.container.rebuild", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" },
+        { "command": "beams.container.teardown", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "3_danger" },
         { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFileChanged", "group": "inline" },
         { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
         { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" }
@@ -177,6 +185,23 @@
           "minimum": 1,
           "maximum": 30,
           "description": "Interval (seconds) for polling open file changes on the beam"
+        },
+        "beams.container.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Global kill-switch for local debug container sync. Does not enable the feature for a beam that didn't opt in at creation — only disables it globally."
+        },
+        "beams.container.syncMinInterval": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Minimum seconds between automatic local debug container sync passes"
+        },
+        "beams.container.baseImage": {
+          "type": "string",
+          "default": "debian:bookworm-slim",
+          "description": "Base Docker image for generated local debug containers"
         }
       }
     }

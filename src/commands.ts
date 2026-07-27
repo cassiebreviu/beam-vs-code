@@ -27,6 +27,22 @@ import {
     applyGitRef,
     writeSessionSummaryToBeam,
 } from './sessionProfiles';
+import {
+    LocalContainerSyncMode,
+    isDockerAvailable,
+    createLocalContainerRecord,
+    getLocalContainerRecord,
+    deleteLocalContainerRecord,
+    generateDockerfile,
+    writeDockerfile,
+    writeDevcontainerJson,
+    buildContainerImage,
+    ensureContainerRunning,
+    stopContainer,
+    removeContainer,
+    openContainerTerminal,
+} from './localContainer';
+import { ContainerSyncEngine } from './containerSync';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -39,6 +55,7 @@ export function registerCommands(
     sessionProfilesProvider: SessionProfilesProvider,
     poller?: import('./polling').BeamPoller,
     _getScm?: () => import('./scm').BeamGitScmProvider | undefined,
+    containerSync?: ContainerSyncEngine,
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('beams.select', async (item: BeamItem) => {
@@ -133,6 +150,40 @@ export function registerCommands(
                 }
             }
 
+            // Local debug container: decided once, here, at creation time only.
+            // There is deliberately no command anywhere in this extension that
+            // edits this choice for an existing beam — delete this beam and
+            // create a new one to change it.
+            let enableLocalContainer = false;
+            let localContainerSyncMode: LocalContainerSyncMode = 'manual';
+            if (await isDockerAvailable()) {
+                const choice = await vscode.window.showQuickPick(
+                    [
+                        { label: '$(circle-slash) No', description: 'Recommended', enable: false },
+                        { label: '$(vm) Yes', description: 'Mirrors this beam into a locked-down local Docker container for debugging. Cannot be changed later — delete this beam and create a new one to change this choice.', enable: true },
+                    ],
+                    { placeHolder: 'Enable local debug container for this beam? (fixed for this beam’s lifetime)' }
+                );
+                if (choice === undefined) {
+                    return;
+                }
+                enableLocalContainer = choice.enable;
+
+                if (enableLocalContainer) {
+                    const syncChoice = await vscode.window.showQuickPick(
+                        [
+                            { label: '$(sync) Automatic', description: 'Syncs shortly after git status changes on the beam (also fixed for this beam’s lifetime)', mode: 'automatic' as LocalContainerSyncMode },
+                            { label: '$(circle-outline) Manual', description: 'Only syncs when you run "Sync Local Debug Container Now"', mode: 'manual' as LocalContainerSyncMode },
+                        ],
+                        { placeHolder: 'How should the local debug container sync from the beam?' }
+                    );
+                    if (syncChoice === undefined) {
+                        return;
+                    }
+                    localContainerSyncMode = syncChoice.mode;
+                }
+            }
+
             try {
                 const beam = await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Creating beam (${picked.template.label})...` },
@@ -174,6 +225,19 @@ export function registerCommands(
                                 publishedUrl = await publishBeam(b.id);
                             } catch { /* non-fatal — user can publish manually */ }
                         }
+
+                        if (enableLocalContainer) {
+                            progress.report({ message: 'Setting up local debug container...' });
+                            try {
+                                const repoRoot = (await detectRepoRoot(b.id)) ?? '/home/beams';
+                                const record = createLocalContainerRecord(b.id, repoRoot, localContainerSyncMode);
+                                writeDockerfile(b.id, generateDockerfile(picked.template));
+                                writeDevcontainerJson(record);
+                            } catch (err: unknown) {
+                                vscode.window.showWarningMessage(`Local debug container setup failed: ${err instanceof Error ? err.message : err}`);
+                            }
+                        }
+
                         return { beam: b, publishedUrl };
                     }
                 );
@@ -182,6 +246,22 @@ export function registerCommands(
                     : `Beam "${beam.beam.id}" created with ${picked.template.label} template.`;
                 vscode.window.showInformationMessage(message);
                 provider.refresh();
+
+                // Build the local container image in the background — not
+                // awaited, so it never adds latency to beam creation itself.
+                const record = getLocalContainerRecord(beam.beam.id);
+                if (record) {
+                    void vscode.window.withProgress(
+                        { location: vscode.ProgressLocation.Notification, title: `Building local debug container image for "${beam.beam.id}"...` },
+                        async () => {
+                            try {
+                                await buildContainerImage(record);
+                            } catch (err: unknown) {
+                                vscode.window.showWarningMessage(`Local debug container image build failed: ${err instanceof Error ? err.message : err}`);
+                            }
+                        }
+                    );
+                }
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to create beam: ${err instanceof Error ? err.message : err}`);
             }
@@ -296,6 +376,23 @@ export function registerCommands(
                 provider.refresh();
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to delete beam: ${err instanceof Error ? err.message : err}`);
+            }
+
+            // A local debug container must never outlive its beam. Cleanup
+            // failures here are surfaced but must never block beam deletion,
+            // which has already succeeded above.
+            const record = getLocalContainerRecord(item.beam.id);
+            if (record) {
+                try {
+                    await stopContainer(record);
+                    await removeContainer(record);
+                    deleteLocalContainerRecord(item.beam.id);
+                } catch (err: unknown) {
+                    vscode.window.showWarningMessage(
+                        `Beam deleted, but cleaning up its local debug container failed: ${err instanceof Error ? err.message : err}. ` +
+                        `You may need to run "docker rm -f ${record.containerName}" manually.`
+                    );
+                }
             }
         }),
 
@@ -1032,6 +1129,108 @@ export function registerCommands(
             deleteSessionProfile(profile.taskId);
             sessionProfilesProvider.refresh();
             vscode.window.showInformationMessage(`Session profile "${profile.label}" deleted.`);
+        }),
+
+        // Local debug container commands. Note there is deliberately no
+        // enable/toggle/configure command here — see beams.create.
+        vscode.commands.registerCommand('beams.container.open', async (item: BeamItem) => {
+            if (!item?.beam) {
+                return;
+            }
+            const record = getLocalContainerRecord(item.beam.id);
+            if (!record?.enabled) {
+                vscode.window.showErrorMessage('This beam does not have a local debug container enabled.');
+                return;
+            }
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Preparing local debug container for "${item.beam.id}"...` },
+                    async () => {
+                        await ensureContainerRunning(record);
+                        if (containerSync) {
+                            await containerSync.syncNow(item.beam.id, record.repoRoot);
+                        }
+                    }
+                );
+                openContainerTerminal(record);
+                vscode.window.showInformationMessage(
+                    `Tip: for full IntelliSense, you can also open ${path.join(os.homedir(), '.teleport', 'beams', 'local-containers', item.beam.id, 'workspace')} directly as a VS Code folder.`
+                );
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Failed to open local debug container: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('beams.container.syncNow', async (item: BeamItem) => {
+            if (!item?.beam || !containerSync) {
+                return;
+            }
+            const record = getLocalContainerRecord(item.beam.id);
+            if (!record?.enabled) {
+                vscode.window.showErrorMessage('This beam does not have a local debug container enabled.');
+                return;
+            }
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Syncing local debug container for "${item.beam.id}"...` },
+                    () => containerSync.syncNow(item.beam.id, record.repoRoot)
+                );
+                vscode.window.showInformationMessage(`Local debug container for "${item.beam.id}" synced.`);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Sync failed: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('beams.container.rebuild', async (item: BeamItem) => {
+            if (!item?.beam) {
+                return;
+            }
+            const record = getLocalContainerRecord(item.beam.id);
+            if (!record?.enabled) {
+                vscode.window.showErrorMessage('This beam does not have a local debug container enabled.');
+                return;
+            }
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Rebuilding local debug container image for "${item.beam.id}"...` },
+                    async () => {
+                        await buildContainerImage(record, { noCache: true });
+                        await removeContainer(record);
+                        await ensureContainerRunning(record);
+                    }
+                );
+                vscode.window.showInformationMessage(`Local debug container for "${item.beam.id}" rebuilt.`);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Rebuild failed: ${err instanceof Error ? err.message : err}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('beams.container.teardown', async (item: BeamItem) => {
+            if (!item?.beam) {
+                return;
+            }
+            const record = getLocalContainerRecord(item.beam.id);
+            if (!record) {
+                vscode.window.showInformationMessage('This beam does not have a local debug container.');
+                return;
+            }
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete the local debug container and synced files for "${item.beam.id}"? The beam itself is not affected.`,
+                { modal: true },
+                'Delete'
+            );
+            if (confirm !== 'Delete') {
+                return;
+            }
+            try {
+                await stopContainer(record);
+                await removeContainer(record);
+                deleteLocalContainerRecord(item.beam.id);
+                provider.refresh();
+                vscode.window.showInformationMessage(`Local debug container for "${item.beam.id}" removed.`);
+            } catch (err: unknown) {
+                vscode.window.showErrorMessage(`Teardown failed: ${err instanceof Error ? err.message : err}`);
+            }
         })
     );
 }

@@ -273,15 +273,29 @@ export async function cloneRepoOnBeam(beamId: string, remoteUrl: string, targetD
     await execOnBeam(beamId, [`git clone "${remoteUrl}" "${targetDir}"`], 180000);
 }
 
-function shellSingleQuote(value: string): string {
+export function shellSingleQuote(value: string): string {
     return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export interface SessionSummaryResult {
+    text?: string;
+    error?: string;
 }
 
 // RFD: "Beams summarizes the session into the profile format." The beam already runs
 // `claude` for the agentic session itself, so ask that same CLI (in headless -p mode,
-// resuming its most recent conversation in this repo) to draft the summary. Read-only
-// by design (--permission-mode plan) — this never edits files on the beam.
-export async function generateSessionSummary(beamId: string, repoRoot: string, label: string): Promise<string | undefined> {
+// resuming its most recent conversation in this repo) to draft the summary. Left at the
+// default ("manual") permission mode, which is reads-only and needs no interactive
+// approval — plan mode is for proposing edits and doesn't fit a read-only reporting task
+// like this (and its "present a plan, ask how to proceed" flow assumes a human is there
+// to answer). `recentActivity` (git log/status) is folded into the prompt so the draft
+// stays grounded even when `--continue` finds no prior conversation to resume.
+export async function generateSessionSummary(
+    beamId: string,
+    repoRoot: string,
+    label: string,
+    recentActivity?: string,
+): Promise<SessionSummaryResult> {
     const prompt = [
         `Write a concise session summary for a task-resumption profile called "${label}".`,
         'Use exactly this markdown structure with no extra preamble or closing remarks:',
@@ -294,15 +308,18 @@ export async function generateSessionSummary(beamId: string, repoRoot: string, l
         '',
         'Fill in terse bullet points under each heading based on this coding session. ' +
         'If a section has nothing to report, leave it with a single bullet saying so.',
+        ...(recentActivity ? ['', 'Recent git activity for additional context:', '', recentActivity] : []),
     ].join('\n');
 
-    const cmd = `cd "${repoRoot}" && claude --continue -p --permission-mode plan ${shellSingleQuote(prompt)}`;
+    const cmd = `cd "${repoRoot}" && claude --continue -p ${shellSingleQuote(prompt)}`;
     try {
         const output = await execOnBeam(beamId, [cmd], 120000);
         const text = output.trim();
-        return text || undefined;
-    } catch {
-        return undefined;
+        return text ? { text } : { error: 'Claude produced no output.' };
+    } catch (err: unknown) {
+        const stderr = typeof (err as { stderr?: unknown })?.stderr === 'string' ? (err as { stderr: string }).stderr.trim() : '';
+        const message = stderr || (err instanceof Error ? err.message : String(err));
+        return { error: message };
     }
 }
 
@@ -340,3 +357,35 @@ export async function writeSessionSummaryToBeam(
     await execOnBeam(beamId, [`mkdir -p "${remoteDir}" && echo "${encoded}" | base64 -d > "${remotePath}"`]);
     return remotePath;
 }
+
+// Claude Code auto-loads /home/beams/.claude/CLAUDE.md (user memory) into every session on
+// the beam without being asked — unlike the per-repo session-memory file above, which
+// only gets read if something explicitly tells Claude to go look at it. Appending the
+// summary here means a freshly started `claude` session already has the context, no
+// initial "go read this file" prompt required. Idempotent: re-resuming the same task
+// replaces its earlier block instead of appending a duplicate.
+export async function appendSessionSummaryToUserMemory(
+    beamId: string,
+    taskId: string,
+    label: string,
+    summaryMd: string,
+): Promise<void> {
+    const remotePath = '/home/beams/.claude/CLAUDE.md';
+    const beginMarker = `<!-- BEGIN session-memory:${taskId} -->`;
+    const endMarker = `<!-- END session-memory:${taskId} -->`;
+    const block = [beginMarker, `## Resumed task: ${label}`, '', summaryMd.trim(), endMarker].join('\n');
+
+    let existing = '';
+    try {
+        existing = await execOnBeam(beamId, [`cat "${remotePath}" 2>/dev/null || true`]);
+    } catch { /* no existing user memory file */ }
+
+    const blockPattern = new RegExp(`${beginMarker}[\\s\\S]*?${endMarker}`);
+    const updated = blockPattern.test(existing)
+        ? existing.replace(blockPattern, block)
+        : `${existing.trim()}${existing.trim() ? '\n\n' : ''}${block}\n`;
+
+    const encoded = Buffer.from(updated, 'utf-8').toString('base64');
+    await execOnBeam(beamId, [`mkdir -p /home/beams/.claude && echo "${encoded}" | base64 -d > "${remotePath}"`]);
+}
+

@@ -4,7 +4,7 @@ import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams } from './tsh';
 import { openBeamTerminal } from './terminal';
-import { getAllTemplates, saveCustomTemplate, deleteCustomTemplate, getCustomTemplates } from './templates';
+import { getAllTemplates } from './templates';
 import { setupGithubOnBeam, openOAuthTerminal, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
@@ -26,6 +26,7 @@ import {
     cloneRepoOnBeam,
     applyGitRef,
     writeSessionSummaryToBeam,
+    appendSessionSummaryToUserMemory,
 } from './sessionProfiles';
 import {
     LocalContainerSyncMode,
@@ -96,7 +97,7 @@ export function registerCommands(
             const allTemplates = getAllTemplates();
             const picked = await vscode.window.showQuickPick(
                 allTemplates.map(t => ({
-                    label: t.custom ? `$(star) ${t.label}` : t.label,
+                    label: t.label,
                     description: t.description,
                     template: t,
                 })),
@@ -265,97 +266,6 @@ export function registerCommands(
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to create beam: ${err instanceof Error ? err.message : err}`);
             }
-        }),
-
-        vscode.commands.registerCommand('beams.saveAsTemplate', async (item: BeamItem) => {
-            if (!item?.beam) {
-                return;
-            }
-
-            const name = await vscode.window.showInputBox({
-                prompt: 'Template name',
-                placeHolder: 'My Custom Setup',
-                ignoreFocusOut: true,
-            });
-            if (!name) {
-                return;
-            }
-
-            const description = await vscode.window.showInputBox({
-                prompt: 'Short description',
-                placeHolder: 'Python + Redis + custom tools',
-                ignoreFocusOut: true,
-            });
-            if (description === undefined) {
-                return;
-            }
-
-            const commandsInput = await vscode.window.showInputBox({
-                prompt: 'Setup commands (semicolon-separated)',
-                placeHolder: 'apt install -y redis; pip install redis; mkdir -p /home/beams/project',
-                value: '',
-                ignoreFocusOut: true,
-            });
-            if (commandsInput === undefined) {
-                return;
-            }
-
-            // If user left commands empty, capture full environment from the beam
-            let commands: string[];
-            let envSnapshot: import('./templates').TemplateEnvSnapshot | undefined;
-            let github: import('./templates').TemplateGithub | undefined;
-            if (!commandsInput.trim()) {
-                const capture = await vscode.window.showQuickPick(
-                    [
-                        { label: 'Capture full environment', description: 'Auto-detect packages, git config, env vars, scripts' },
-                        { label: 'Save with no commands', description: 'Template will just create an empty beam' },
-                    ],
-                    { placeHolder: 'No commands entered — capture from beam?' }
-                );
-
-                if (capture?.label === 'Capture full environment') {
-                    const captured = await captureBeamConfig(item.beam.id);
-                    commands = captured.commands;
-                    envSnapshot = captured.envSnapshot;
-                    // Capture current GitHub settings as template defaults
-                    const cfg = vscode.workspace.getConfiguration('beams');
-                    const ghUsername = cfg.get<string>('github.username');
-                    const ghAuthMethod = cfg.get<string>('github.authMethod') as 'pat' | 'oauth' | 'tsh-git' | '';
-                    if (ghUsername && ghAuthMethod) {
-                        github = {
-                            username: ghUsername,
-                            email: cfg.get<string>('github.email') || undefined,
-                            authMethod: ghAuthMethod,
-                        };
-                    }
-                } else {
-                    commands = ['mkdir -p /home/beams/project'];
-                }
-            } else {
-                commands = commandsInput.split(';').map(c => c.trim()).filter(Boolean);
-            }
-
-            await saveCustomTemplate({ label: name, description: description || '', commands, github, envSnapshot });
-            vscode.window.showInformationMessage(`Template "${name}" saved.`);
-        }),
-
-        vscode.commands.registerCommand('beams.deleteTemplate', async () => {
-            const custom = getCustomTemplates();
-            if (custom.length === 0) {
-                vscode.window.showInformationMessage('No custom templates to delete.');
-                return;
-            }
-
-            const picked = await vscode.window.showQuickPick(
-                custom.map(t => ({ label: t.label, description: t.description })),
-                { placeHolder: 'Select a custom template to delete' }
-            );
-            if (!picked) {
-                return;
-            }
-
-            await deleteCustomTemplate(picked.label);
-            vscode.window.showInformationMessage(`Template "${picked.label}" deleted.`);
         }),
 
         vscode.commands.registerCommand('beams.delete', async (item: BeamItem) => {
@@ -754,64 +664,7 @@ export function registerCommands(
         }),
 
         vscode.commands.registerCommand('beams.createSetupProfile', async () => {
-            const existing = listSessionProfiles();
-            const taskId = await vscode.window.showInputBox({
-                prompt: 'Profile id',
-                placeHolder: 'vscode-server',
-                ignoreFocusOut: true,
-                validateInput: v => /^[a-z0-9][a-z0-9-_]*$/i.test(v) ? undefined : 'Use letters, numbers, - and _ only',
-            });
-            if (!taskId) return;
-
-            const existingProfile = existing.find(p => p.taskId === taskId);
-            const label = await vscode.window.showInputBox({
-                prompt: 'Short label for this profile',
-                value: existingProfile?.label ?? taskId,
-                ignoreFocusOut: true,
-            });
-            if (label === undefined) return;
-
-            const description = await vscode.window.showInputBox({
-                prompt: 'Short description (saved as this profile\'s summary)',
-                placeHolder: 'Installs code-server and publishes it for browser-based development',
-                ignoreFocusOut: true,
-            });
-            if (description === undefined) return;
-
-            const commandsInput = await vscode.window.showInputBox({
-                prompt: 'Setup commands to run on the target beam (semicolon-separated)',
-                placeHolder: 'curl -fsSL https://code-server.dev/install.sh | sh; ...',
-                ignoreFocusOut: true,
-            });
-            const commands = (commandsInput ?? '').split(';').map(c => c.trim()).filter(Boolean);
-            if (commands.length === 0) {
-                vscode.window.showErrorMessage('At least one setup command is required.');
-                return;
-            }
-
-            const autoPublishPick = await vscode.window.showQuickPick(
-                [
-                    { label: 'No', description: 'Just run the setup commands', value: false },
-                    { label: 'Yes', description: 'Also run `tsh beams publish` after setup', value: true },
-                ],
-                { placeHolder: 'Automatically publish the beam after setup?', ignoreFocusOut: true }
-            );
-            if (!autoPublishPick) return;
-
-            const now = new Date().toISOString();
-            const status = await checkStatus();
-            const profile: SessionProfile = {
-                taskId,
-                label,
-                beamId: '',
-                createdBy: status.user || os.userInfo().username,
-                createdAt: existingProfile?.createdAt ?? now,
-                updatedAt: now,
-                setup: { commands, autoPublish: autoPublishPick.value },
-            };
-            saveSessionProfile(profile, `# ${label}\n\n${description}\n`);
-            sessionProfilesProvider.refresh();
-            vscode.window.showInformationMessage(`Setup profile "${label}" saved.`);
+            await runSetupProfileFlow(sessionProfilesProvider);
         }),
 
         vscode.commands.registerCommand('beams.saveSessionProfile', async (item?: BeamItem) => {
@@ -833,13 +686,9 @@ export function registerCommands(
             }
 
             const repoRoot = await detectRepoRoot(beamId);
-            if (!repoRoot) {
-                vscode.window.showErrorMessage('No git repository found on this beam under /home/beams.');
-                return;
-            }
 
             const existing = listSessionProfiles();
-            const existingForBeam = existing.find(p => p.beamId === beamId);
+            const existingForBeam = existing.find(p => p.beamId === beamId && !p.setup);
             const taskId = await vscode.window.showInputBox({
                 prompt: 'Task/profile id (used to resume this session later)',
                 placeHolder: 'fix-auth-bug',
@@ -861,94 +710,7 @@ export function registerCommands(
                 return;
             }
 
-            let gitRef: { branch: string; sha: string };
-            let remoteUrl: string | undefined;
-            let recentActivity = '';
-            let llmSummary: string | undefined;
-            try {
-                const captured = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: 'Reading git state from beam...' },
-                    async (progress) => {
-                        const ref = await captureGitRef(beamId!, repoRoot);
-                        const url = await captureRemoteUrl(beamId!, repoRoot);
-                        const activity = await captureRecentActivity(beamId!, repoRoot);
-                        progress.report({ message: 'Asking Claude on the beam to draft the summary...' });
-                        const summary = await generateSessionSummary(beamId!, repoRoot, label);
-                        return { ref, url, activity, summary };
-                    }
-                );
-                gitRef = captured.ref;
-                remoteUrl = captured.url;
-                recentActivity = captured.activity;
-                llmSummary = captured.summary;
-            } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to read git state: ${err instanceof Error ? err.message : err}`);
-                return;
-            }
-
-            const priorSummary = getSessionSummary(taskId);
-            let template: string;
-            if (priorSummary) {
-                template = priorSummary;
-            } else if (llmSummary) {
-                template = [`# Session Summary: ${label}`, '', llmSummary].join('\n');
-            } else {
-                template = [
-                    `# Session Summary: ${label}`,
-                    '',
-                    '## What was tried',
-                    '',
-                    '## Decisions made',
-                    '',
-                    "## What's left",
-                    '',
-                    ...(recentActivity ? ['---', '', '_Claude auto-summary unavailable — reference below, fill in manually:_', '', recentActivity, ''] : []),
-                ].join('\n');
-            }
-            const scratchDoc = await vscode.workspace.openTextDocument({ content: template, language: 'markdown' });
-            await vscode.window.showTextDocument(scratchDoc, { preview: false });
-
-            const action = await vscode.window.showInformationMessage(
-                llmSummary
-                    ? `Claude drafted a session summary for "${label}" — review/edit it in the opened editor, then click Save Profile.`
-                    : `Auto-draft failed — fill in "What was tried / Decisions made / What's left" for "${label}" in the opened editor, then click Save Profile.`,
-                'Save Profile', 'Cancel'
-            );
-            if (action !== 'Save Profile') {
-                return;
-            }
-
-            const summaryMd = scratchDoc.getText();
-            if (summaryMd.trim() === template.trim()) {
-                const proceed = await vscode.window.showWarningMessage(
-                    'The session summary still looks like the unedited template — save it as-is?',
-                    { modal: true },
-                    'Save Anyway'
-                );
-                if (proceed !== 'Save Anyway') {
-                    return;
-                }
-            }
-
-            const now = new Date().toISOString();
-            const status = await checkStatus();
-            const profile: SessionProfile = {
-                taskId,
-                label,
-                beamId,
-                repoRoot,
-                gitBranch: gitRef.branch,
-                gitCommitSha: gitRef.sha,
-                remoteUrl,
-                createdBy: status.user || os.userInfo().username,
-                createdAt: existingProfile?.createdAt ?? now,
-                updatedAt: now,
-            };
-            saveSessionProfile(profile, summaryMd);
-            sessionProfilesProvider.refresh();
-            vscode.window.showInformationMessage(
-                `Session profile "${label}" saved (${gitRef.branch}@${gitRef.sha.slice(0, 7)}).`
-            );
+            await runSaveSessionProfileFlow(sessionProfilesProvider, beamId, repoRoot, taskId, label, existingProfile);
         }),
 
         vscode.commands.registerCommand('beams.viewSessionProfile', async (item?: SessionProfileItem) => {
@@ -1071,7 +833,9 @@ export function registerCommands(
                         await applyGitRef(beamId, repoRoot, profile!.gitBranch, profile!.gitCommitSha ?? '');
 
                         progress.report({ message: 'Loading session memory...' });
-                        await writeSessionSummaryToBeam(beamId, repoRoot, profile!.taskId, getSessionSummary(profile!.taskId));
+                        const summaryMd = getSessionSummary(profile!.taskId);
+                        await writeSessionSummaryToBeam(beamId, repoRoot, profile!.taskId, summaryMd);
+                        await appendSessionSummaryToUserMemory(beamId, profile!.taskId, profile!.label, summaryMd);
                         wroteMemoryFile = true;
                     }
                 );
@@ -1084,10 +848,20 @@ export function registerCommands(
             const resultMessage = publishedUrl
                 ? `"${profile.label}" resumed on beam "${beamId}". Published at ${publishedUrl}`
                 : `"${profile.label}" resumed on beam "${beamId}".`;
-            if (wroteMemoryFile) {
-                const openAction = await vscode.window.showInformationMessage(resultMessage, 'Open Session Memory File');
-                if (openAction === 'Open Session Memory File' && beamId) {
-                    const repoRoot = await detectRepoRoot(beamId) ?? profile.repoRoot;
+            if (wroteMemoryFile && beamId) {
+                const repoRoot = await detectRepoRoot(beamId) ?? profile.repoRoot;
+                if (repoRoot) {
+                    // The summary was also appended to /home/beams/.claude/CLAUDE.md
+                    // (user memory), which Claude Code auto-loads into every session on
+                    // this beam — no need to explicitly tell it to go read a file.
+                    const terminal = openBeamTerminal({ id: beamId });
+                    terminal.sendText(`cd "${repoRoot}" && claude`);
+                }
+                const openAction = await vscode.window.showInformationMessage(
+                    `${resultMessage} Started a Claude session with the saved memory loaded.`,
+                    'Open Session Memory File'
+                );
+                if (openAction === 'Open Session Memory File' && repoRoot) {
                     const uri = vscode.Uri.parse(`beam://${beamId}${repoRoot}/.claude/session-memory/${profile.taskId}.md`);
                     const doc = await vscode.workspace.openTextDocument(uri);
                     await vscode.window.showTextDocument(doc);
@@ -1095,6 +869,50 @@ export function registerCommands(
             } else {
                 vscode.window.showInformationMessage(resultMessage);
             }
+        }),
+
+        vscode.commands.registerCommand('beams.updateSessionProfile', async (item?: SessionProfileItem) => {
+            let profile = item?.profile;
+            if (!profile) {
+                const all = listSessionProfiles();
+                if (all.length === 0) {
+                    vscode.window.showInformationMessage('No saved session profiles.');
+                    return;
+                }
+                const picked = await vscode.window.showQuickPick(
+                    all.map(p => ({ label: p.label, description: p.taskId, profile: p })),
+                    { placeHolder: 'Select a session profile to update', ignoreFocusOut: true }
+                );
+                if (!picked) {
+                    return;
+                }
+                profile = picked.profile;
+            }
+
+            if (profile.setup) {
+                await runSetupProfileFlow(sessionProfilesProvider, profile);
+                return;
+            }
+
+            const beams = await listBeams();
+            let beamId = profile.beamId && beams.some(b => b.id === profile!.beamId) ? profile.beamId : undefined;
+            if (!beamId) {
+                const picked = await vscode.window.showQuickPick(
+                    beams.map(b => ({ label: b.id, description: b.owner ? `Owner: ${b.owner}` : undefined })),
+                    {
+                        placeHolder: `"${profile.label}" was saved from beam "${profile.beamId || '?'}", which is no longer available — select a beam to update from`,
+                        ignoreFocusOut: true,
+                    }
+                );
+                if (!picked) {
+                    return;
+                }
+                beamId = picked.label;
+            }
+
+            const repoRoot = await detectRepoRoot(beamId) ?? profile.repoRoot;
+
+            await runSaveSessionProfileFlow(sessionProfilesProvider, beamId, repoRoot, profile.taskId, profile.label, profile);
         }),
 
         vscode.commands.registerCommand('beams.deleteSessionProfile', async (item?: SessionProfileItem) => {
@@ -1235,118 +1053,176 @@ export function registerCommands(
     );
 }
 
-interface CapturedConfig {
-    commands: string[];
-    github?: import('./templates').TemplateGithub;
-    envSnapshot?: import('./templates').TemplateEnvSnapshot;
+// Shared by beams.saveSessionProfile (new profile, beamId/repoRoot/taskId/label freshly
+// prompted) and beams.updateSessionProfile (reuses the stored beamId/taskId/label so the
+// existing profile.json/summary.md are simply overwritten in place).
+async function runSaveSessionProfileFlow(
+    sessionProfilesProvider: SessionProfilesProvider,
+    beamId: string,
+    repoRoot: string | undefined,
+    taskId: string,
+    label: string,
+    existingProfile: SessionProfile | undefined,
+): Promise<void> {
+    let gitRef: { branch: string; sha: string } | undefined;
+    let remoteUrl: string | undefined;
+    let recentActivity = '';
+    let llmSummary: string | undefined;
+    let llmSummaryError: string | undefined;
+    try {
+        const captured = await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: `${existingProfile ? 'Updating' : 'Saving'} session profile "${label}"...`,
+            },
+            async (progress) => {
+                let ref: { branch: string; sha: string } | undefined;
+                let url: string | undefined;
+                let activity = '';
+                if (repoRoot) {
+                    progress.report({ message: 'Reading git state from beam...' });
+                    ref = await captureGitRef(beamId, repoRoot);
+                    url = await captureRemoteUrl(beamId, repoRoot);
+                    activity = await captureRecentActivity(beamId, repoRoot);
+                }
+                progress.report({ message: 'Asking Claude on the beam to draft the summary...' });
+                const summary = await generateSessionSummary(beamId, repoRoot ?? '/home/beams', label, activity);
+                return { ref, url, activity, summary };
+            }
+        );
+        gitRef = captured.ref;
+        remoteUrl = captured.url;
+        recentActivity = captured.activity;
+        llmSummary = captured.summary.text;
+        llmSummaryError = captured.summary.error;
+    } catch (err: unknown) {
+        vscode.window.showErrorMessage(`Failed to read git state: ${err instanceof Error ? err.message : err}`);
+        return;
+    }
+
+    const priorSummary = getSessionSummary(taskId);
+    let summaryMd: string;
+    if (priorSummary) {
+        summaryMd = priorSummary;
+    } else if (llmSummary) {
+        summaryMd = [`# Session Summary: ${label}`, '', llmSummary].join('\n');
+    } else {
+        summaryMd = [
+            `# Session Summary: ${label}`,
+            '',
+            '## What was tried',
+            '',
+            '## Decisions made',
+            '',
+            "## What's left",
+            '',
+            ...(llmSummaryError ? [`_Claude auto-draft failed: ${llmSummaryError}_`, ''] : []),
+            ...(recentActivity ? ['---', '', '_Reference below, fill in manually:_', '', recentActivity, ''] : []),
+        ].join('\n');
+    }
+
+    const now = new Date().toISOString();
+    const status = await checkStatus();
+    const profile: SessionProfile = {
+        taskId,
+        label,
+        beamId,
+        repoRoot,
+        gitBranch: gitRef?.branch,
+        gitCommitSha: gitRef?.sha,
+        remoteUrl,
+        createdBy: existingProfile?.createdBy ?? (status.user || os.userInfo().username),
+        createdAt: existingProfile?.createdAt ?? now,
+        updatedAt: now,
+    };
+    saveSessionProfile(profile, summaryMd);
+    sessionProfilesProvider.refresh();
+    await vscode.commands.executeCommand('beamSessionProfiles.focus');
+    const gitSuffix = gitRef ? ` (${gitRef.branch}@${gitRef.sha.slice(0, 7)})` : ' (no git repository detected on this beam)';
+    vscode.window.showInformationMessage(
+        `Session profile "${label}" ${existingProfile ? 'updated' : 'saved'}${gitSuffix}.`
+    );
+
+    // Open the saved summary file itself (not a scratch buffer) so further edits save
+    // straight back to disk — no separate confirm-before-save step.
+    const summaryDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(getSessionSummaryPath(taskId)));
+    await vscode.window.showTextDocument(summaryDoc, { preview: false });
 }
 
-async function captureBeamConfig(beamId: string): Promise<CapturedConfig> {
-    const commands: string[] = ['mkdir -p /home/beams/project'];
-    const envSnapshot: import('./templates').TemplateEnvSnapshot = {};
+// Shared by beams.createSetupProfile (no existing profile, prompts for a fresh taskId)
+// and beams.updateSessionProfile (existing setup profile, taskId/inputs pre-filled and
+// overwritten in place on save).
+async function runSetupProfileFlow(
+    sessionProfilesProvider: SessionProfilesProvider,
+    existingProfile?: SessionProfile,
+): Promise<void> {
+    let taskId = existingProfile?.taskId;
+    if (!taskId) {
+        taskId = await vscode.window.showInputBox({
+            prompt: 'Profile id',
+            placeHolder: 'vscode-server',
+            ignoreFocusOut: true,
+            validateInput: v => /^[a-z0-9][a-z0-9-_]*$/i.test(v) ? undefined : 'Use letters, numbers, - and _ only',
+        });
+        if (!taskId) return;
+    }
 
-    // Packages: pip
-    try {
-        const pipOutput = await execOnBeam(beamId, ['pip freeze 2>/dev/null || true']);
-        const packages = pipOutput.trim().split('\n').filter(l => l && !l.startsWith('#'));
-        if (packages.length > 0) {
-            commands.push('python3 -m venv /home/beams/project/.venv');
-            commands.push(`/home/beams/project/.venv/bin/pip install ${packages.join(' ')}`);
+    const label = await vscode.window.showInputBox({
+        prompt: 'Short label for this profile',
+        value: existingProfile?.label ?? taskId,
+        ignoreFocusOut: true,
+    });
+    if (label === undefined) return;
+
+    const priorDescription = existingProfile
+        ? getSessionSummary(existingProfile.taskId).replace(/^#[^\n]*\n+/, '').trim()
+        : '';
+    const description = await vscode.window.showInputBox({
+        prompt: 'Short description (saved as this profile\'s summary)',
+        placeHolder: 'Installs code-server and publishes it for browser-based development',
+        value: priorDescription || undefined,
+        ignoreFocusOut: true,
+    });
+    if (description === undefined) return;
+
+    const commandsInput = await vscode.window.showInputBox({
+        prompt: 'Setup commands to run on the target beam (semicolon-separated)',
+        placeHolder: 'curl -fsSL https://code-server.dev/install.sh | sh; ...',
+        value: existingProfile?.setup?.commands?.join('; '),
+        ignoreFocusOut: true,
+    });
+    const commands = (commandsInput ?? '').split(';').map(c => c.trim()).filter(Boolean);
+    if (commands.length === 0) {
+        vscode.window.showErrorMessage('At least one setup command is required.');
+        return;
+    }
+
+    const autoPublishPick = await vscode.window.showQuickPick(
+        [
+            { label: 'No', description: 'Just run the setup commands', value: false },
+            { label: 'Yes', description: 'Also run `tsh beams publish` after setup', value: true },
+        ],
+        {
+            placeHolder: 'Automatically publish the beam after setup?',
+            ignoreFocusOut: true,
         }
-    } catch { /* no pip */ }
+    );
+    if (!autoPublishPick) return;
 
-    // Packages: npm global
-    try {
-        const npmGlobal = await execOnBeam(beamId, ['npm list -g --depth=0 --json 2>/dev/null || true']);
-        const parsed = JSON.parse(npmGlobal);
-        const deps = Object.keys(parsed.dependencies ?? {}).filter(d => d !== 'npm');
-        if (deps.length > 0) {
-            commands.push(`npm install -g ${deps.join(' ')}`);
-        }
-    } catch { /* no npm or parse error */ }
-
-    // Packages: apt
-    try {
-        const aptOutput = await execOnBeam(beamId, ["apt-mark showmanual 2>/dev/null | grep -v -E '^(base-files|bash|coreutils|dpkg|apt)' || true"]);
-        const aptPkgs = aptOutput.trim().split('\n').filter(Boolean);
-        if (aptPkgs.length > 0) {
-            commands.push(`apt-get install -y ${aptPkgs.join(' ')}`);
-        }
-    } catch { /* no apt */ }
-
-    // Git config
-    try {
-        const gitOutput = await execOnBeam(beamId, ['git config --global --list 2>/dev/null || true']);
-        const entries = gitOutput.trim().split('\n')
-            .filter(l => l.includes('='))
-            .map(l => { const [k, ...v] = l.split('='); return { key: k, value: v.join('=') }; });
-        if (entries.length > 0) {
-            envSnapshot.gitConfig = entries;
-            for (const { key, value } of entries) {
-                commands.push(`git config --global "${key}" "${value}"`);
-            }
-        }
-    } catch { /* no git */ }
-
-    // Environment variables from .profile/.bashrc
-    try {
-        const envOutput = await execOnBeam(beamId, [
-            'grep -h "^export " ~/.profile ~/.bashrc 2>/dev/null | sort -u || true']);
-        const exports = envOutput.trim().split('\n').filter(Boolean);
-        if (exports.length > 0) {
-            envSnapshot.envVars = exports;
-            for (const line of exports) {
-                commands.push(`grep -qxF '${line}' ~/.bashrc 2>/dev/null || echo '${line}' >> ~/.bashrc`);
-            }
-        }
-    } catch { /* ignore */ }
-
-    // Custom scripts in ~/bin
-    try {
-        const binLs = await execOnBeam(beamId, ['ls ~/bin 2>/dev/null || true']);
-        const scripts = binLs.trim().split('\n').filter(Boolean);
-        if (scripts.length > 0) {
-            const binTar = await execOnBeam(beamId, [
-                'tar -czf - -C ~ bin 2>/dev/null | base64 -w0'], 30000);
-            if (binTar.trim() && binTar.trim().length < 5 * 1024 * 1024) {
-                envSnapshot.binScriptsTar = binTar.trim();
-                commands.push('mkdir -p ~/bin');
-                commands.push(`echo "${binTar.trim()}" | base64 -d | tar -xzf - -C ~`);
-                commands.push('chmod +x ~/bin/*');
-            }
-        }
-    } catch { /* no ~/bin */ }
-
-    // Systemd user services
-    try {
-        const units = await execOnBeam(beamId, [
-            'systemctl --user list-unit-files --state=enabled --no-legend 2>/dev/null | awk "{print \\$1}" || true']);
-        const services = units.trim().split('\n').filter(Boolean);
-        if (services.length > 0) {
-            const unitEntries: Array<{ name: string; content: string }> = [];
-            for (const svc of services) {
-                try {
-                    const content = await execOnBeam(beamId, [
-                        `cat ~/.config/systemd/user/${svc} 2>/dev/null || true`]);
-                    if (content.trim()) {
-                        unitEntries.push({ name: svc, content: content.trim() });
-                        const escaped = content.trim().replace(/'/g, "'\\''");
-                        commands.push(`mkdir -p ~/.config/systemd/user`);
-                        commands.push(`cat > ~/.config/systemd/user/${svc} << 'UNIT_EOF'\n${escaped}\nUNIT_EOF`);
-                        commands.push(`systemctl --user enable ${svc}`);
-                    }
-                } catch { /* skip this unit */ }
-            }
-            if (unitEntries.length > 0) {
-                envSnapshot.systemdUnits = unitEntries;
-            }
-        }
-    } catch { /* no systemd user */ }
-
-    const hasSnapshot = envSnapshot.gitConfig || envSnapshot.envVars || envSnapshot.binScriptsTar || envSnapshot.systemdUnits;
-    return {
-        commands,
-        envSnapshot: hasSnapshot ? envSnapshot : undefined,
+    const now = new Date().toISOString();
+    const status = await checkStatus();
+    const profile: SessionProfile = {
+        taskId,
+        label,
+        beamId: '',
+        createdBy: existingProfile?.createdBy ?? (status.user || os.userInfo().username),
+        createdAt: existingProfile?.createdAt ?? now,
+        updatedAt: now,
+        setup: { commands, autoPublish: autoPublishPick.value },
     };
+    saveSessionProfile(profile, `# ${label}\n\n${description}\n`);
+    sessionProfilesProvider.refresh();
+    await vscode.commands.executeCommand('beamSessionProfiles.focus');
+    vscode.window.showInformationMessage(`Setup profile "${label}" ${existingProfile ? 'updated' : 'saved'}.`);
 }
 

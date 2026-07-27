@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Beam } from './tsh';
 
-export function openBeamTerminal(beam: Beam): vscode.Terminal {
+export function openBeamTerminal(beam: Pick<Beam, 'id'>): vscode.Terminal {
     const tshPath = process.platform === 'win32' ? 'tsh.exe' : 'tsh';
     const terminal = vscode.window.createTerminal({
         name: `Beam: ${beam.id}`,

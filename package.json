@@ -68,8 +68,6 @@
       { "command": "beams.openFile", "title": "Open File", "category": "Beams" },
       { "command": "beams.refreshFiles", "title": "Refresh Files", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.export", "title": "Export as Zip", "icon": "$(cloud-download)", "category": "Beams" },
-      { "command": "beams.saveAsTemplate", "title": "Save as Template", "icon": "$(save)", "category": "Beams" },
-      { "command": "beams.deleteTemplate", "title": "Delete Custom Template", "category": "Beams" },
       { "command": "beams.login", "title": "Login", "icon": "$(key)", "category": "Beams" },
       { "command": "beams.setupGithub", "title": "Setup GitHub on Beam", "icon": "$(mark-github)", "category": "Beams" },
       { "command": "beams.run", "title": "Run on Beam", "icon": "$(play)", "category": "Beams" },
@@ -84,6 +82,7 @@
       { "command": "beams.createPullRequest", "title": "Create Pull Request", "icon": "$(git-pull-request-create)", "category": "Beams" },
       { "command": "beams.selectScm", "title": "Initialize SCM", "category": "Beams" },
       { "command": "beams.saveSessionProfile", "title": "Save Session Profile", "icon": "$(save)", "category": "Beams" },
+      { "command": "beams.updateSessionProfile", "title": "Update Session Profile", "icon": "$(sync)", "category": "Beams" },
       { "command": "beams.resumeSessionProfile", "title": "Resume Session Profile", "icon": "$(play-circle)", "category": "Beams" },
       { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
       { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
@@ -114,7 +113,6 @@
         { "command": "beams.copyUrl", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
         { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
-        { "command": "beams.saveAsTemplate", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveSessionProfile", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.container.open", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.container.syncNow", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
@@ -123,6 +121,7 @@
         { "command": "beams.container.teardown", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "3_danger" },
         { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFileChanged", "group": "inline" },
         { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
+        { "command": "beams.updateSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
         { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" }
       ],
       "scm/title": [

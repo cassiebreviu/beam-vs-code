@@ -335,7 +335,7 @@ export function registerCommands(
                     await config.update('enableRemoteCommand', true, vscode.ConfigurationTarget.Global);
                 }
                 const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}${folder}`);
-                await vscode.commands.executeCommand('vscode.openFolder', remoteUri);
+                await vscode.commands.executeCommand('vscode.openFolder', remoteUri, { forceNewWindow: true });
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to connect: ${err instanceof Error ? err.message : err}`);
             }
@@ -1100,11 +1100,8 @@ async function runSaveSessionProfileFlow(
         return;
     }
 
-    const priorSummary = getSessionSummary(taskId);
     let summaryMd: string;
-    if (priorSummary) {
-        summaryMd = priorSummary;
-    } else if (llmSummary) {
+    if (llmSummary) {
         summaryMd = [`# Session Summary: ${label}`, '', llmSummary].join('\n');
     } else {
         summaryMd = [

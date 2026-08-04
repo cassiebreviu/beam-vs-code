@@ -17,6 +17,7 @@ Manage and connect to Teleport Beams directly from VS Code. Create, monitor, and
 
 ## Prerequisites
 
+- A Beams account — sign up at [beams.run](https://www.beams.run/)
 - [Teleport](https://goteleport.com/docs/installation/) (`tsh` CLI) installed and in your PATH
 - Logged in to your Teleport cluster: `tsh login --proxy=<cluster>.beams.sh`
 - VS Code 1.85+

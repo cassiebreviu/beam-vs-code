@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execOnBeam } from './tsh';
+import { execOnBeam, shellSingleQuote } from './tsh';
 
 // A profile is either (or both):
 // - a resumable work session: repoRoot/gitBranch/gitCommitSha/remoteUrl capture where you left off
@@ -241,7 +241,7 @@ export async function detectRepoRoot(beamId: string): Promise<string | undefined
 
 export async function captureGitRef(beamId: string, repoRoot: string): Promise<{ branch: string; sha: string }> {
     const output = await execOnBeam(beamId, [
-        `cd "${repoRoot}" && git rev-parse --abbrev-ref HEAD && echo "---SEP---" && git rev-parse HEAD`,
+        `cd ${shellSingleQuote(repoRoot)} && git rev-parse --abbrev-ref HEAD && echo "---SEP---" && git rev-parse HEAD`,
     ], 10000);
     const sepIdx = output.indexOf('---SEP---');
     if (sepIdx === -1) {
@@ -252,16 +252,23 @@ export async function captureGitRef(beamId: string, repoRoot: string): Promise<{
     return { branch, sha };
 }
 
+// `branch`/`sha` may come straight from a saved profile.json (untrusted — profiles are meant
+// to be portable/shareable) rather than from input validated at save time, so they must be
+// quoted rather than interpolated into the double-quoted command below.
 export async function applyGitRef(beamId: string, repoRoot: string, branch: string, sha: string): Promise<void> {
+    const root = shellSingleQuote(repoRoot);
+    const ref = shellSingleQuote(branch);
+    const remoteRef = shellSingleQuote(`origin/${branch}`);
+    const commit = shellSingleQuote(sha);
     await execOnBeam(beamId, [
-        `cd "${repoRoot}" && git fetch origin "${branch}" 2>/dev/null; ` +
-        `(git checkout "${branch}" 2>/dev/null || git checkout -b "${branch}" "origin/${branch}") && git reset --hard "${sha}"`,
+        `cd ${root} && git fetch origin ${ref} 2>/dev/null; ` +
+        `(git checkout ${ref} 2>/dev/null || git checkout -b ${ref} ${remoteRef}) && git reset --hard ${commit}`,
     ], 30000);
 }
 
 export async function captureRemoteUrl(beamId: string, repoRoot: string): Promise<string | undefined> {
     try {
-        const output = await execOnBeam(beamId, [`cd "${repoRoot}" && git config --get remote.origin.url`], 10000);
+        const output = await execOnBeam(beamId, [`cd ${shellSingleQuote(repoRoot)} && git config --get remote.origin.url`], 10000);
         const url = output.trim();
         return url || undefined;
     } catch {
@@ -269,12 +276,9 @@ export async function captureRemoteUrl(beamId: string, repoRoot: string): Promis
     }
 }
 
+// `remoteUrl`/`targetDir` may originate from a saved profile.json (untrusted) when resuming.
 export async function cloneRepoOnBeam(beamId: string, remoteUrl: string, targetDir: string): Promise<void> {
-    await execOnBeam(beamId, [`git clone "${remoteUrl}" "${targetDir}"`], 180000);
-}
-
-export function shellSingleQuote(value: string): string {
-    return `'${value.replace(/'/g, `'\\''`)}'`;
+    await execOnBeam(beamId, [`git clone ${shellSingleQuote(remoteUrl)} ${shellSingleQuote(targetDir)}`], 180000);
 }
 
 export interface SessionSummaryResult {
@@ -311,7 +315,7 @@ export async function generateSessionSummary(
         ...(recentActivity ? ['', 'Recent git activity for additional context:', '', recentActivity] : []),
     ].join('\n');
 
-    const cmd = `cd "${repoRoot}" && claude --continue -p ${shellSingleQuote(prompt)}`;
+    const cmd = `cd ${shellSingleQuote(repoRoot)} && claude --continue -p ${shellSingleQuote(prompt)}`;
     try {
         const output = await execOnBeam(beamId, [cmd], 120000);
         const text = output.trim();
@@ -328,11 +332,12 @@ export async function generateSessionSummary(
 export async function captureRecentActivity(beamId: string, repoRoot: string): Promise<string> {
     let log = '';
     let status = '';
+    const root = shellSingleQuote(repoRoot);
     try {
-        log = await execOnBeam(beamId, [`cd "${repoRoot}" && git log --oneline -15 2>/dev/null`], 10000);
+        log = await execOnBeam(beamId, [`cd ${root} && git log --oneline -15 2>/dev/null`], 10000);
     } catch { /* ignore */ }
     try {
-        status = await execOnBeam(beamId, [`cd "${repoRoot}" && git status --porcelain=v1 2>/dev/null`], 10000);
+        status = await execOnBeam(beamId, [`cd ${root} && git status --porcelain=v1 2>/dev/null`], 10000);
     } catch { /* ignore */ }
 
     const sections: string[] = [];
@@ -354,7 +359,7 @@ export async function writeSessionSummaryToBeam(
     const remotePath = `${repoRoot}/.claude/session-memory/${taskId}.md`;
     const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/'));
     const encoded = Buffer.from(summaryMd, 'utf-8').toString('base64');
-    await execOnBeam(beamId, [`mkdir -p "${remoteDir}" && echo "${encoded}" | base64 -d > "${remotePath}"`]);
+    await execOnBeam(beamId, [`mkdir -p ${shellSingleQuote(remoteDir)} && echo "${encoded}" | base64 -d > ${shellSingleQuote(remotePath)}`]);
     return remotePath;
 }
 

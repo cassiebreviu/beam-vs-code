@@ -9,9 +9,10 @@ npm run compile        # one-shot TypeScript compile → out/
 npm run dev            # watch mode, recompiles on save
 npm run package        # compile + vsce package → teleport-beams-<version>.vsix
 npm run install-local  # install the built .vsix into VS Code
+npm test                # compile + run test/*.test.js (node:test)
 ```
 
-There is no test suite and no linter configured. TypeScript compilation (`tsc`) is the only correctness check.
+There is no linter configured. The test suite is minimal (currently just `test/ssh.test.js`, covering SSH config repair) — TypeScript compilation (`tsc`) remains the primary correctness check for everything else.
 
 Press **F5** in VS Code to launch the Extension Development Host (reads `.vscode/launch.json`).
 

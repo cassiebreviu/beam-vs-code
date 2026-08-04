@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { execOnBeam } from './tsh';
+import { execOnBeam, shellSingleQuote } from './tsh';
 import { BeamGitScmProvider } from './scm';
 import { BeamPoller } from './polling';
 import { toOwnerRepo } from './github';
@@ -30,7 +30,7 @@ export function registerScmCommands(
             if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
             const filePath = resourceState.resourceUri.path;
             await execOnBeam(poller.getBeamId()!, [
-                'git', '-C', poller.getRepoRoot()!, 'add', filePath,
+                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} add ${shellSingleQuote(filePath)}`,
             ]);
             poller.pollNow();
         }),
@@ -40,7 +40,7 @@ export function registerScmCommands(
             if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
             const filePath = resourceState.resourceUri.path;
             await execOnBeam(poller.getBeamId()!, [
-                'git', '-C', poller.getRepoRoot()!, 'reset', 'HEAD', filePath,
+                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} reset HEAD ${shellSingleQuote(filePath)}`,
             ]);
             poller.pollNow();
         }),
@@ -58,7 +58,7 @@ export function registerScmCommands(
 
             const filePath = resourceState.resourceUri.path;
             await execOnBeam(poller.getBeamId()!, [
-                'git', '-C', poller.getRepoRoot()!, 'checkout', '--', filePath,
+                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} checkout -- ${shellSingleQuote(filePath)}`,
             ]);
             poller.pollNow();
         }),
@@ -76,7 +76,7 @@ export function registerScmCommands(
 
             try {
                 await execOnBeam(poller.getBeamId()!, [
-                    'git', '-C', poller.getRepoRoot()!, 'commit', '-m', message,
+                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} commit -m ${shellSingleQuote(message)}`,
                 ]);
                 scm.inputBox.value = '';
                 poller.pollNow();
@@ -97,10 +97,11 @@ export function registerScmCommands(
             if (!beamId || !repoRoot) return;
 
             try {
-                const branch = (await execOnBeam(beamId, ['git', '-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+                const root = shellSingleQuote(repoRoot);
+                const branch = (await execOnBeam(beamId, [`git -C ${root} rev-parse --abbrev-ref HEAD`])).trim();
                 await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Pushing "${branch}"...` },
-                    () => execOnBeam(beamId, ['git', '-C', repoRoot, 'push', '-u', 'origin', branch], 60000)
+                    () => execOnBeam(beamId, [`git -C ${root} push -u origin ${shellSingleQuote(branch)}`], 60000)
                 );
                 vscode.window.showInformationMessage(`Pushed "${branch}" to origin.`);
             } catch (err: unknown) {
@@ -115,8 +116,9 @@ export function registerScmCommands(
             if (!beamId || !repoRoot) return;
 
             try {
-                const branch = (await execOnBeam(beamId, ['git', '-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-                const remoteUrl = (await execOnBeam(beamId, ['git', '-C', repoRoot, 'config', '--get', 'remote.origin.url'])).trim();
+                const root = shellSingleQuote(repoRoot);
+                const branch = (await execOnBeam(beamId, [`git -C ${root} rev-parse --abbrev-ref HEAD`])).trim();
+                const remoteUrl = (await execOnBeam(beamId, [`git -C ${root} config --get remote.origin.url`])).trim();
                 if (!remoteUrl) {
                     vscode.window.showErrorMessage('No git remote configured for this repo.');
                     return;
@@ -124,7 +126,7 @@ export function registerScmCommands(
 
                 await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: `Pushing "${branch}"...` },
-                    () => execOnBeam(beamId, ['git', '-C', repoRoot, 'push', '-u', 'origin', branch], 60000)
+                    () => execOnBeam(beamId, [`git -C ${root} push -u origin ${shellSingleQuote(branch)}`], 60000)
                 );
 
                 // Opens in the user's own authenticated browser session — avoids needing

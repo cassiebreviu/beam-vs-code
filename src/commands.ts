@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BeamItem } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates } from './templates';
 import { setupGithubOnBeam, openOAuthTerminal, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
@@ -855,7 +855,7 @@ export function registerCommands(
                     // (user memory), which Claude Code auto-loads into every session on
                     // this beam — no need to explicitly tell it to go read a file.
                     const terminal = openBeamTerminal({ id: beamId });
-                    terminal.sendText(`cd "${repoRoot}" && claude`);
+                    terminal.sendText(`cd ${shellSingleQuote(repoRoot)} && claude`);
                 }
                 const openAction = await vscode.window.showInformationMessage(
                     `${resultMessage} Started a Claude session with the saved memory loaded.`,

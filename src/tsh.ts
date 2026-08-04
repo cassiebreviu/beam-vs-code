@@ -64,6 +64,16 @@ export async function execOnBeam(id: string, command: string[], timeout?: number
     return output;
 }
 
+// `tsh beams exec` joins its argv into a single remote command line rather than preserving
+// argument boundaries (confirmed empirically — a multi-element `command` array arrives on the
+// beam as one space-joined string re-parsed by the remote shell). Any value that isn't a fixed
+// literal — file paths, commit messages, branch names, anything sourced from user input or a
+// stored profile — must be quoted with this before being interpolated into a command string,
+// or it can break argument boundaries or inject shell syntax on the beam.
+export function shellSingleQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 export async function checkStatus(): Promise<TshStatus> {
     try {
         const output = await runTsh(['status']);

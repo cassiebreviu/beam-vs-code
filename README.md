@@ -7,15 +7,15 @@ Manage and connect to Teleport Beams directly from VS Code. Create, monitor, and
 - **Beams sidebar** — list, create, and delete beams
 - **File explorer** — browse beam files without SSH
 - **Agent Activity** — live token usage, cost estimation, and tool call tracking
-- **Agent Events** — chronological stream of Claude session events parsed from the JSONL transcript
+- **Agent Events** — chronological stream of Claude session events
 - **Remote-SSH** — one-click VS Code Remote-SSH connection to any beam
 - **Terminal** — open a tsh SSH session in the integrated terminal
-- **Source Control** — stage, unstage, commit, discard, push, and open a pull request against a beam's repo from the native SCM panel
+- **Source Control** — stage, unstage, commit, discard, push, and open PRs from the native SCM panel
 - **Templates** — provision new beams from built-in starter templates
-- **Session Profiles** — checkpoint a task's git state + a summarized session memory so you can resume on a fresh beam where you left off (local prototype of the "Beams Task Profiles" RFD)
-- **Local Debug Containers** — mirror a beam's workspace into a local Docker container for fast iteration
+- **Session Profiles** — checkpoint a task's git state + session summary so you can resume on a fresh beam
+- **Local Debug Containers** — mirror a beam's workspace into a local Docker container
 - **Export** — download beam files as a tar.gz archive
-- **GitHub credentials** — PAT, OAuth, or Teleport Git Proxy authentication for git operations on beams
+- **GitHub credentials** — PAT, OAuth, or Teleport Git Proxy authentication for git operations
 
 ## Prerequisites
 
@@ -44,6 +44,8 @@ Or in VS Code: Extensions panel > `...` menu > "Install from VSIX..." and select
 ```bash
 npm install
 npm run dev        # watch mode — recompiles on save
+npm run compile    # one-shot TypeScript compile
+npm test           # compile + run tests
 ```
 
 Press `F5` in VS Code to launch the Extension Development Host.
@@ -60,23 +62,12 @@ Press `F5` in VS Code to launch the Extension Development Host.
 
 ## Session Profiles
 
-A **Session Profile** is a per-task checkpoint of where you left off: the git branch/commit a task was on, plus a short markdown summary of what was tried, decisions made, and what's left. It's a local prototype of the RFD's `save-session` / `resume-session` workflow — profiles are stored under `~/.teleport/beams/session-profiles/<task-id>/` (not S3), and code changes always go through your normal git commit/push, never through the profile.
+A **Session Profile** checkpoints where you left off on a task: the git branch/commit plus a short markdown summary of what was tried, decisions made, and what's left. Profiles are stored locally under `~/.teleport/beams/session-profiles/<task-id>/`. Code changes always go through your normal git commit/push flow.
 
-- **Save Session Profile** (right-click a beam in the **Beams** panel) — reads the beam's current git branch/commit, asks the `claude` CLI already running on that beam (`claude --continue -p`, read-only) to draft a summary of the session, then saves immediately and opens the saved `summary.md` so you can keep editing it in place. Falls back to a blank template seeded with recent git log/status if the auto-draft fails.
-- **Update Session Profile** (from the panel's inline actions) — re-runs the same capture-and-save flow against an existing profile, regenerating its summary from the beam's current state.
-- **Session Profiles** panel — lists saved profiles; click one to view its summary.
-- **Resume Session Profile** (from the panel, or command palette) — pick a profile and a target beam (existing or new); it checks out the recorded branch/commit on that beam (cloning first if needed) and writes the summary to `.claude/session-memory/<task-id>.md` in the repo as well as the beam's Claude user memory, so a freshly started `claude` session already has the context loaded.
-- **Delete Session Profile** — removes the local profile permanently.
-
-Note: this MVP does not yet implement the RFD's scan-before-write/scan-before-load content check — summaries are treated as trusted local input for now.
-
-## SSH Configuration
-
-The extension automatically manages `~/.ssh/config` entries for beam connections. It:
-
-- Uses the `.beams.sh` domain reported by `tsh status`
-- Sets up a `ProxyCommand` that routes through `tsh proxy ssh` using the beam alias
-- Migrates stale `.beams.run` entries automatically
+- **Save** (right-click a beam) — captures git state and auto-drafts a summary via the beam's `claude` CLI, then opens `summary.md` for editing.
+- **Update** (inline action on an existing profile) — re-captures from the beam's current state.
+- **Resume** (command palette or panel) — checks out the recorded branch/commit on a target beam and injects the summary into Claude's session memory.
+- **Delete** — removes the local profile.
 
 ## Commands
 
@@ -85,27 +76,21 @@ The extension automatically manages `~/.ssh/config` entries for beam connections
 | Beams: Login | Authenticate with Teleport |
 | Beams: Create Beam | Create a new beam from a template |
 | Beams: Delete Beam | Delete a beam |
-| Beams: Open in VS Code (Remote-SSH) | Connect via Remote-SSH (opens a new window) |
+| Beams: Open in VS Code (Remote-SSH) | Connect via Remote-SSH |
 | Beams: SSH into Beam | Open terminal session |
 | Beams: Open Beam Files | Browse files remotely |
 | Beams: Export as Zip | Download beam contents |
-| Beams: Publish Beam / Unpublish Beam | Make a beam accessible via URL, or take it back down |
+| Beams: Publish / Unpublish Beam | Make a beam accessible via URL |
 | Beams: Run on Beam | Run a command on a beam and publish its port |
-| Beams: Setup GitHub on Beam | Configure git identity and GitHub auth (PAT, OAuth, or Teleport Git Proxy) |
-| Beams: Commit / Push Branch / Create Pull Request | Git operations against a beam's repo from the SCM panel |
-| Beams: Save Session Profile | Checkpoint a beam's git state + session summary |
-| Beams: Update Session Profile | Regenerate an existing profile's summary from the beam's current state |
-| Beams: Resume Session Profile | Restore a saved profile's git state + summary into a beam |
-| Beams: View Session Profile | Open a saved profile's summary |
-| Beams: Delete Session Profile | Remove a saved session profile |
-| Beams: New Setup Profile | Save a reusable list of provisioning commands as a profile |
-| Beams: Open/Sync/Rebuild/Delete Local Debug Container | Manage a local Docker mirror of a beam's workspace |
+| Beams: Setup GitHub on Beam | Configure git identity and GitHub auth |
+| Beams: Commit / Push / Create Pull Request | Git operations from the SCM panel |
+| Beams: Save / Update / Resume / Delete Session Profile | Session profile management |
+| Beams: Local Debug Container (Open/Sync/Rebuild/Delete) | Manage a local Docker mirror |
 
-This is a representative list — see the Command Palette (`Cmd+Shift+P` → "Beams:") for the full set.
+See the Command Palette (`Cmd+Shift+P` → "Beams:") for the full set.
 
 ## Packaging
 
 ```bash
 npm run package    # builds and produces teleport-beams-<version>.vsix
 ```
-

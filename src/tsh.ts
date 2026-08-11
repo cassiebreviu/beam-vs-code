@@ -64,6 +64,19 @@ export async function execOnBeam(id: string, command: string[], timeout?: number
     return output;
 }
 
+export async function waitForBeamReady(id: string, timeoutMs = 60000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        try {
+            await execOnBeam(id, ['true'], 5000);
+            return;
+        } catch {
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+    throw new Error(`Beam "${id}" did not become ready within ${timeoutMs / 1000}s`);
+}
+
 // `tsh beams exec` joins its argv into a single remote command line rather than preserving
 // argument boundaries (confirmed empirically — a multi-element `command` array arrives on the
 // beam as one space-joined string re-parsed by the remote shell). Any value that isn't a fixed

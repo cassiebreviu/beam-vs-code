@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BeamItem } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote, waitForBeamReady } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates } from './templates';
 import { setupGithubOnBeam, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
@@ -190,6 +190,8 @@ export function registerCommands(
                     { location: vscode.ProgressLocation.Notification, title: `Creating beam (${picked.template.label})...` },
                     async (progress) => {
                         const b = await addBeam();
+                        progress.report({ message: 'Waiting for beam to be ready...' });
+                        await waitForBeamReady(b.id);
                         if (picked.template.commands.length > 0) {
                             progress.report({ message: 'Running template setup...' });
                             for (const cmd of picked.template.commands) {

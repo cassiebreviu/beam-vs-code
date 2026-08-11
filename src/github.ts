@@ -82,11 +82,13 @@ export async function setupGithubOnBeam(
             await execScriptOnBeam(beamId, 'gh auth setup-git', timeout);
         }
 
-        progress.report({ message: 'Configuring Teleport git proxy...' });
-        await execScriptOnBeam(beamId, 'tsh git config update 2>/dev/null || true', timeout);
+        if (authMethod === 'pat') {
+            progress.report({ message: 'Configuring Teleport git proxy...' });
+            await execScriptOnBeam(beamId, 'tsh git config update 2>/dev/null || true', timeout);
+        }
     }
 
-    if (cloneRepo) {
+    if (cloneRepo && authMethod !== 'oauth') {
         progress.report({ message: `Cloning ${cloneRepo}...` });
         const ownerRepo = toOwnerRepo(cloneRepo);
         const repoName = ownerRepo.split('/').pop()?.replace(/\.git$/, '') || 'repo';
@@ -154,7 +156,6 @@ export async function autoSetupGithub(
                 email: email || `${username}@users.noreply.github.com`,
                 authMethod: 'oauth',
             }, progress);
-            openOAuthTerminal(beamId);
             return { applied: true };
         } catch (err) {
             return { applied: false, error: err instanceof Error ? err.message : String(err) };
@@ -183,12 +184,3 @@ export function toOwnerRepo(input: string): string {
     return m ? m[1] : input.replace(/\.git$/, '').replace(/\/+$/, '');
 }
 
-export function openOAuthTerminal(beamId: string): void {
-    const terminal = vscode.window.createTerminal({
-        name: `gh auth - ${beamId}`,
-        shellPath: 'tsh',
-        shellArgs: ['beams', 'exec', beamId, '--', 'gh', 'auth', 'login', '-h', 'github.com', '-p', 'https', '-w'],
-        iconPath: new vscode.ThemeIcon('mark-github'),
-    });
-    terminal.show();
-}

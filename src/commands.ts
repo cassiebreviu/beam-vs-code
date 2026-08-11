@@ -5,7 +5,7 @@ import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { getAllTemplates } from './templates';
-import { setupGithubOnBeam, openOAuthTerminal, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
+import { setupGithubOnBeam, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
@@ -207,7 +207,7 @@ export function registerCommands(
                                         beamId: b.id,
                                         username: templateGithub.username!,
                                         email: templateGithub.email || `${templateGithub.username}@users.noreply.github.com`,
-                                        authMethod: templateGithub.authMethod || 'tsh-git',
+                                        authMethod: templateGithub.authMethod || 'oauth',
                                         cloneRepo: templateGithub.cloneRepo,
                                     }, progress);
                                 } else if (applyGithubCredentials) {
@@ -464,7 +464,7 @@ export function registerCommands(
 
             const authChoice = await vscode.window.showQuickPick(
                 [
-                    { label: '$(shield) Teleport Git Proxy (tsh git)', description: 'Use Teleport-managed GitHub access — no token needed', method: 'tsh-git' as const },
+                    // { label: '$(shield) Teleport Git Proxy (tsh git)', description: 'Use Teleport-managed GitHub access — no token needed', method: 'tsh-git' as const },
                     { label: '$(globe) Full account access (OAuth)', description: 'Authenticate via browser — grants access to all your repos', method: 'oauth' as const },
                     { label: '$(key) Fine-grained token (PAT)', description: 'Paste a token scoped to specific repos', method: 'pat' as const },
                 ],
@@ -487,19 +487,22 @@ export function registerCommands(
                 }
             }
 
-            const cloneRepo = await vscode.window.showInputBox({
-                prompt: 'Repository to clone (or leave empty to skip)',
-                placeHolder: 'owner/repo',
-                ignoreFocusOut: true,
-            });
-
+            let cloneRepo: string | undefined;
             let cloneDir: string | undefined;
-            if (cloneRepo) {
-                cloneDir = await vscode.window.showInputBox({
-                    prompt: 'Clone directory (or leave empty for default)',
-                    placeHolder: '/home/beams/my-project',
+            if (authChoice.method !== 'oauth') {
+                cloneRepo = await vscode.window.showInputBox({
+                    prompt: 'Repository to clone (or leave empty to skip)',
+                    placeHolder: 'owner/repo',
                     ignoreFocusOut: true,
-                });
+                }) || undefined;
+
+                if (cloneRepo) {
+                    cloneDir = await vscode.window.showInputBox({
+                        prompt: 'Clone directory (or leave empty for default)',
+                        placeHolder: '/home/beams/my-project',
+                        ignoreFocusOut: true,
+                    }) || undefined;
+                }
             }
 
             try {
@@ -512,15 +515,16 @@ export function registerCommands(
                             email: email || `${username}@users.noreply.github.com`,
                             authMethod: authChoice.method,
                             pat,
-                            cloneRepo: cloneRepo || undefined,
-                            cloneDir: cloneDir || undefined,
+                            cloneRepo,
+                            cloneDir,
                         }, progress);
                     }
                 );
 
                 if (authChoice.method === 'oauth') {
-                    openOAuthTerminal(beamId);
-                    vscode.window.showInformationMessage('GitHub CLI installed and git configured. Complete OAuth login in the terminal.');
+                    vscode.window.showInformationMessage(
+                        'GitHub CLI installed. Open a terminal on the beam and run: gh auth login'
+                    );
                 } else {
                     vscode.window.showInformationMessage('GitHub setup complete on beam.');
                 }

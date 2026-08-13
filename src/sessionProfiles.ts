@@ -24,7 +24,124 @@ export interface SessionProfile {
     createdAt: string;
     updatedAt: string;
     setup?: SessionProfileSetup;
+    builtin?: boolean;
 }
+
+export const builtinSetupProfiles: SessionProfile[] = [
+    {
+        taskId: 'builtin-vnc-desktop',
+        label: 'VNC Desktop',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y tigervnc-standalone-server dbus-x11 openbox tint2 thunar firefox-esr',
+                'rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null; nohup Xtigervnc :1 -geometry 1920x1080 -depth 24 -rfbport 5901 -SecurityTypes None > /tmp/vnc.log 2>&1 & sleep 2 && export DISPLAY=:1 && nohup openbox > /dev/null 2>&1 & nohup tint2 > /dev/null 2>&1 & nohup vncconfig -nowin > /dev/null 2>&1 & nohup code --no-sandbox --disable-gpu > /dev/null 2>&1 & sleep 2 && pgrep Xtigervnc > /dev/null && echo vnc-ready',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-vscode-server',
+        label: 'VS Code Server',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://code-server.dev/install.sh | sh 2>&1 | tail -5',
+                'nohup /usr/bin/code-server --bind-addr 0.0.0.0:8080 --auth none > /tmp/code-server.log 2>&1 & sleep 3 && pgrep -f code-server > /dev/null && echo code-server-started',
+            ],
+            autoPublish: true,
+        },
+    },
+    {
+        taskId: 'builtin-python',
+        label: 'Python',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-venv',
+                'pip3 install --break-system-packages black ruff pyright ipython pytest',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-node',
+        label: 'Node.js',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs',
+                'npm install -g typescript eslint prettier ts-node @types/node',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-go',
+        label: 'Go',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | sudo tar -C /usr/local -xz && echo "export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin" >> ~/.bashrc && export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin',
+                'go install golang.org/x/tools/gopls@latest && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install mvdan.cc/gofumpt@latest',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-open-webui',
+        label: 'Open WebUI (Chat)',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-venv',
+                'pip3 install --break-system-packages --no-warn-script-location --no-cache-dir open-webui 2>&1 | grep -E "Installing|Successfully|ERROR" | tail -10',
+                'export PATH="$HOME/.local/bin:$PATH" && nohup bash -c \'export PATH="$HOME/.local/bin:$PATH"; OPENAI_API_BASE_URLS="$OPENAI_BASE_URL;$ANTHROPIC_BASE_URL" OPENAI_API_KEYS="$OPENAI_API_KEY;$ANTHROPIC_API_KEY" WEBUI_AUTH=false open-webui serve --port 8080\' > /tmp/open-webui.log 2>&1 & sleep 5 && pgrep -f open-webui > /dev/null',
+            ],
+            autoPublish: true,
+        },
+    },
+    {
+        taskId: 'builtin-rust',
+        label: 'Rust',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . "$HOME/.cargo/env"',
+                '. "$HOME/.cargo/env" && rustup component add rust-analyzer clippy rustfmt && cargo install cargo-watch cargo-edit',
+            ],
+            autoPublish: false,
+        },
+    },
+];
 
 function getProfilesRoot(): string {
     return path.join(os.homedir(), '.teleport', 'beams', 'session-profiles');
@@ -87,6 +204,7 @@ const FIELD_ALIASES: Record<keyof SessionProfile, string[]> = {
     createdBy: ['createdby', 'userid', 'author'],
     createdAt: ['createdat'],
     updatedAt: ['updatedat'],
+    builtin: [],
 };
 
 function normalizeKey(key: string): string {
@@ -157,22 +275,21 @@ function parseSessionProfileJson(text: string): SessionProfile | undefined {
 
 export function listSessionProfiles(): SessionProfile[] {
     const root = getProfilesRoot();
-    if (!fs.existsSync(root)) {
-        return [];
+    const userProfiles: SessionProfile[] = [];
+    if (fs.existsSync(root)) {
+        for (const taskId of fs.readdirSync(root)) {
+            const file = path.join(root, taskId, 'profile.json');
+            if (!fs.existsSync(file)) continue;
+            try {
+                const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
+                if (profile) {
+                    userProfiles.push(profile);
+                }
+            } catch { /* skip corrupt profile */ }
+        }
+        userProfiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     }
-    const profiles: SessionProfile[] = [];
-    for (const taskId of fs.readdirSync(root)) {
-        const file = path.join(root, taskId, 'profile.json');
-        if (!fs.existsSync(file)) continue;
-        try {
-            const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
-            if (profile) {
-                profiles.push(profile);
-            }
-        } catch { /* skip corrupt profile */ }
-    }
-    profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return profiles;
+    return [...builtinSetupProfiles, ...userProfiles];
 }
 
 export function getSessionProfile(taskId: string): SessionProfile | undefined {

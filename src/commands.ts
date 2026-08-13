@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BeamItem } from './beamItem';
+import { BeamItem, setBeamLabel } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote, waitForBeamReady } from './tsh';
@@ -44,6 +44,7 @@ import {
     openContainerTerminal,
 } from './localContainer';
 import { ContainerSyncEngine } from './containerSync';
+import { VncManager } from './vnc';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -57,6 +58,7 @@ export function registerCommands(
     poller?: import('./polling').BeamPoller,
     _getScm?: () => import('./scm').BeamGitScmProvider | undefined,
     containerSync?: ContainerSyncEngine,
+    vncManager?: VncManager,
 ): void {
     context.subscriptions.push(
         vscode.commands.registerCommand('beams.select', async (item: BeamItem) => {
@@ -73,6 +75,18 @@ export function registerCommands(
         }),
 
         vscode.commands.registerCommand('beams.refresh', () => {
+            provider.refresh();
+        }),
+
+        vscode.commands.registerCommand('beams.rename', async (item?: BeamItem) => {
+            if (!item?.beam) { return; }
+            const newName = await vscode.window.showInputBox({
+                prompt: 'Enter a custom name for this beam (leave empty to reset)',
+                placeHolder: item.beam.id,
+                value: (item.label as string) !== item.beam.id ? (item.label as string) : '',
+            });
+            if (newName === undefined) { return; }
+            setBeamLabel(item.beam.id, newName || undefined);
             provider.refresh();
         }),
 
@@ -95,21 +109,40 @@ export function registerCommands(
 
         vscode.commands.registerCommand('beams.create', async () => {
             const allTemplates = getAllTemplates();
-            const picked = await vscode.window.showQuickPick(
-                allTemplates.map(t => ({
+            const allProfiles = listSessionProfiles();
+
+            type PickItem = { label: string; description?: string; kind?: vscode.QuickPickItemKind; template?: import('./templates').BeamTemplate; profile?: import('./sessionProfiles').SessionProfile };
+            const items: PickItem[] = [
+                ...allTemplates.map(t => ({
                     label: t.label,
                     description: t.description,
                     template: t,
                 })),
-                { placeHolder: 'Select a template for the new beam' }
-            );
+            ];
+            if (allProfiles.length > 0) {
+                items.push({ label: 'Session Profiles', kind: vscode.QuickPickItemKind.Separator });
+                items.push(...allProfiles.map(p => ({
+                    label: p.label,
+                    description: p.builtin ? 'built-in' : (p.setup ? `${p.setup.commands.length} command(s)` : p.gitBranch ?? ''),
+                    profile: p,
+                })));
+            }
+
+            const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select a template for the new beam' });
             if (!picked) {
                 return;
             }
 
+            if (picked.profile) {
+                await vscode.commands.executeCommand('beams.resumeSessionProfile', new SessionProfileItem(picked.profile));
+                return;
+            }
+
+            const template = picked.template!;
+
             // Resolve conflict between template GitHub config and stored preferences
             let useTemplateGithub = false;
-            const templateGithub = picked.template.github;
+            const templateGithub = template.github;
             if (templateGithub?.username) {
                 const cfg = vscode.workspace.getConfiguration('beams');
                 const storedUsername = cfg.get<string>('github.username');
@@ -187,14 +220,14 @@ export function registerCommands(
 
             try {
                 const beam = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Creating beam (${picked.template.label})...` },
+                    { location: vscode.ProgressLocation.Notification, title: `Creating beam (${template.label})...` },
                     async (progress) => {
                         const b = await addBeam();
                         progress.report({ message: 'Waiting for beam to be ready...' });
                         await waitForBeamReady(b.id);
-                        if (picked.template.commands.length > 0) {
+                        if (template.commands.length > 0) {
                             progress.report({ message: 'Running template setup...' });
-                            for (const cmd of picked.template.commands) {
+                            for (const cmd of template.commands) {
                                 await execOnBeam(b.id, [cmd]);
                             }
                         }
@@ -222,7 +255,7 @@ export function registerCommands(
                         } catch { /* non-fatal */ }
 
                         let publishedUrl: string | undefined;
-                        if (picked.template.autoPublish) {
+                        if (template.autoPublish) {
                             progress.report({ message: 'Publishing beam...' });
                             try {
                                 publishedUrl = await publishBeam(b.id);
@@ -234,7 +267,7 @@ export function registerCommands(
                             try {
                                 const repoRoot = (await detectRepoRoot(b.id)) ?? '/home/beams';
                                 const record = createLocalContainerRecord(b.id, repoRoot, localContainerSyncMode);
-                                writeDockerfile(b.id, generateDockerfile(picked.template));
+                                writeDockerfile(b.id, generateDockerfile(template));
                                 writeDevcontainerJson(record);
                             } catch (err: unknown) {
                                 vscode.window.showWarningMessage(`Local debug container setup failed: ${err instanceof Error ? err.message : err}`);
@@ -245,8 +278,8 @@ export function registerCommands(
                     }
                 );
                 const message = beam.publishedUrl
-                    ? `Beam "${beam.beam.id}" created with ${picked.template.label} template. Published at ${beam.publishedUrl}`
-                    : `Beam "${beam.beam.id}" created with ${picked.template.label} template.`;
+                    ? `Beam "${beam.beam.id}" created with ${template.label} template. Published at ${beam.publishedUrl}`
+                    : `Beam "${beam.beam.id}" created with ${template.label} template.`;
                 vscode.window.showInformationMessage(message);
                 provider.refresh();
 
@@ -553,49 +586,29 @@ export function registerCommands(
         }),
 
         vscode.commands.registerCommand('beams.run', async (item?: BeamItem) => {
-            const beamId = item?.beam?.id;
-            if (!beamId) {
+            if (!item?.beam) {
                 vscode.window.showErrorMessage('Select a beam first.');
                 return;
             }
-
-            const command = await vscode.window.showInputBox({
-                prompt: 'Command to run on the beam (must listen on port 8080)',
-                placeHolder: 'npm start / python3 -m http.server 8080 / go run .',
-            });
-            if (!command) {
-                return;
-            }
-
-            const terminal = vscode.window.createTerminal({
-                name: `Run: ${beamId}`,
-                shellPath: 'tsh',
-                shellArgs: ['beams', 'exec', beamId, '--', command],
-                iconPath: new vscode.ThemeIcon('play'),
-            });
-            terminal.show();
-
-            try {
-                const url = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
-                    () => publishBeam(beamId)
-                );
+            if (item.beam.url) {
+                vscode.env.openExternal(vscode.Uri.parse(item.beam.url));
+            } else {
                 const action = await vscode.window.showInformationMessage(
-                    `Beam running and published: ${url}`,
-                    'Open in Browser',
-                    'Copy URL',
-                    'Open in VS Code (Remote-SSH)'
+                    'This beam is not published yet. Publish it first?',
+                    'Publish'
                 );
-                if (action === 'Open in Browser') {
-                    vscode.env.openExternal(vscode.Uri.parse(url));
-                } else if (action === 'Copy URL') {
-                    await vscode.env.clipboard.writeText(url);
-                } else if (action === 'Open in VS Code (Remote-SSH)') {
-                    await vscode.commands.executeCommand('beams.connect', item);
+                if (action === 'Publish') {
+                    try {
+                        const url = await vscode.window.withProgress(
+                            { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
+                            () => publishBeam(item.beam.id)
+                        );
+                        provider.refresh();
+                        vscode.env.openExternal(vscode.Uri.parse(url));
+                    } catch (err: unknown) {
+                        vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
+                    }
                 }
-                provider.refresh();
-            } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
             }
         }),
 
@@ -723,6 +736,13 @@ export function registerCommands(
             if (!item?.profile) {
                 return;
             }
+            if (item.profile.builtin) {
+                const cmds = item.profile.setup?.commands ?? [];
+                const content = `# ${item.profile.label}\n\nBuilt-in setup profile.\n\n## Commands\n\n${cmds.map(c => '```\n' + c + '\n```').join('\n\n')}\n\nAuto-publish: ${item.profile.setup?.autoPublish ? 'yes' : 'no'}\n`;
+                const doc = await vscode.workspace.openTextDocument({ content, language: 'markdown' });
+                await vscode.window.showTextDocument(doc, { preview: true });
+                return;
+            }
             const uri = vscode.Uri.file(getSessionSummaryPath(item.profile.taskId));
             const doc = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(doc, { preview: true });
@@ -776,12 +796,16 @@ export function registerCommands(
                             progress.report({ message: 'Creating beam...' });
                             const b = await addBeam();
                             beamId = b.id;
+                            progress.report({ message: 'Waiting for beam to be ready...' });
+                            await waitForBeamReady(beamId);
                         }
 
                         if (profile!.setup?.commands?.length) {
                             progress.report({ message: 'Running setup commands...' });
-                            for (const cmd of profile!.setup.commands) {
-                                await execOnBeam(beamId, [cmd]);
+                            for (let i = 0; i < profile!.setup.commands.length; i++) {
+                                const cmd = profile!.setup.commands[i];
+                                progress.report({ message: `Running command ${i + 1}/${profile!.setup.commands.length}...` });
+                                await execOnBeam(beamId, [cmd], 600000);
                             }
                             if (profile!.setup.autoPublish) {
                                 progress.report({ message: 'Publishing beam...' });
@@ -1055,6 +1079,54 @@ export function registerCommands(
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Teardown failed: ${err instanceof Error ? err.message : err}`);
             }
+        }),
+
+        vscode.commands.registerCommand('beams.vnc.setup', async (item: BeamItem) => {
+            if (!item?.beam || !vncManager) { return; }
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Setting up VNC on beam...' },
+                async () => {
+                    await vncManager.startVnc(item.beam.id);
+                    await vncManager.openTunnel(item.beam.id);
+                }
+            );
+            const localPort = vscode.workspace.getConfiguration('beams').get<number>('vnc.localPort', 5901);
+            provider.refresh();
+            vscode.window.showInformationMessage(
+                `VNC ready! Connect your VNC client to 127.0.0.1:${localPort}`,
+                'Copy Address'
+            ).then(choice => {
+                if (choice === 'Copy Address') {
+                    vscode.env.clipboard.writeText(`127.0.0.1:${localPort}`);
+                }
+            });
+        }),
+
+        vscode.commands.registerCommand('beams.vnc.connect', async (item: BeamItem) => {
+            if (!item?.beam || !vncManager) { return; }
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: 'Opening VNC tunnel...' },
+                async () => {
+                    await vncManager.openTunnel(item.beam.id);
+                }
+            );
+            const localPort = vscode.workspace.getConfiguration('beams').get<number>('vnc.localPort', 5901);
+            provider.refresh();
+            vscode.window.showInformationMessage(
+                `VNC tunnel open at 127.0.0.1:${localPort}`,
+                'Copy Address'
+            ).then(choice => {
+                if (choice === 'Copy Address') {
+                    vscode.env.clipboard.writeText(`127.0.0.1:${localPort}`);
+                }
+            });
+        }),
+
+        vscode.commands.registerCommand('beams.vnc.disconnect', async (_item: BeamItem) => {
+            if (!vncManager) { return; }
+            vncManager.closeTunnel();
+            provider.refresh();
+            vscode.window.showInformationMessage('VNC tunnel closed.');
         })
     );
 }

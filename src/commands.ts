@@ -801,11 +801,17 @@ export function registerCommands(
                         }
 
                         if (profile!.setup?.commands?.length) {
-                            progress.report({ message: 'Running setup commands...' });
+                            const output = vscode.window.createOutputChannel(`Beams: ${profile!.label}`);
+                            output.show(true);
                             for (let i = 0; i < profile!.setup.commands.length; i++) {
                                 const cmd = profile!.setup.commands[i];
-                                progress.report({ message: `Running command ${i + 1}/${profile!.setup.commands.length}...` });
-                                await execOnBeam(beamId, [cmd], 600000);
+                                const preview = cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd;
+                                progress.report({ message: `[${i + 1}/${profile!.setup.commands.length}] ${preview}` });
+                                output.appendLine(`\n▶ [${i + 1}/${profile!.setup.commands.length}] ${cmd}\n`);
+                                const result = await execOnBeam(beamId, [cmd], 600000);
+                                if (result.trim()) {
+                                    output.appendLine(result);
+                                }
                             }
                             if (profile!.setup.autoPublish) {
                                 progress.report({ message: 'Publishing beam...' });

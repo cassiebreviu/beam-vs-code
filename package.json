@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamEvents", "onView:beamSessionProfiles", "onView:beamVnc", "onCommand:beams.connect", "onFileSystem:beam-git"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamEvents", "onCommand:beams.connect", "onFileSystem:beam-git"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -43,14 +43,6 @@
         {
           "id": "beamEvents",
           "name": "Agent Events"
-        },
-        {
-          "id": "beamSessionProfiles",
-          "name": "Session Profiles"
-        },
-        {
-          "id": "beamVnc",
-          "name": "VNC"
         }
       ]
     },
@@ -81,31 +73,18 @@
       { "command": "beams.gitPush", "title": "Push Branch", "icon": "$(cloud-upload)", "category": "Beams" },
       { "command": "beams.createPullRequest", "title": "Create Pull Request", "icon": "$(git-pull-request-create)", "category": "Beams" },
       { "command": "beams.selectScm", "title": "Initialize SCM", "category": "Beams" },
-      { "command": "beams.saveSessionProfile", "title": "Save Session Profile", "icon": "$(save)", "category": "Beams" },
-      { "command": "beams.updateSessionProfile", "title": "Update Session Profile", "icon": "$(sync)", "category": "Beams" },
-      { "command": "beams.resumeSessionProfile", "title": "Resume Session Profile", "icon": "$(play-circle)", "category": "Beams" },
-      { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
-      { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
-      { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" },
-      { "command": "beams.createSetupProfile", "title": "New Setup Profile", "icon": "$(add)", "category": "Beams" },
       { "command": "beams.container.open", "title": "Open Local Debug Container", "icon": "$(debug-console)", "category": "Beams" },
       { "command": "beams.container.syncNow", "title": "Sync Local Debug Container Now", "icon": "$(sync)", "category": "Beams" },
       { "command": "beams.container.rebuild", "title": "Rebuild Local Debug Container Image", "icon": "$(refresh)", "category": "Beams" },
       { "command": "beams.container.teardown", "title": "Delete Local Debug Container", "icon": "$(trash)", "category": "Beams" },
-      { "command": "beams.rename", "title": "Rename Beam", "icon": "$(edit)", "category": "Beams" },
-      { "command": "beams.vnc.setup", "title": "Setup VNC on Beam", "icon": "$(vm)", "category": "Beams" },
-      { "command": "beams.vnc.connect", "title": "Connect VNC", "icon": "$(plug)", "category": "Beams" },
-      { "command": "beams.vnc.disconnect", "title": "Disconnect VNC", "icon": "$(debug-disconnect)", "category": "Beams" }
+      { "command": "beams.rename", "title": "Rename Beam", "icon": "$(edit)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
         { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
-        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" },
-        { "command": "beams.createSetupProfile", "when": "view == beamSessionProfiles", "group": "navigation" },
-        { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles", "group": "navigation" },
-        { "command": "beams.refreshSessionProfiles", "when": "view == beamSessionProfiles", "group": "navigation" }
+        { "command": "beams.refreshFiles", "when": "view == beamFiles", "group": "navigation" }
       ],
       "view/item/context": [
         { "command": "beams.connect", "when": "view == beamsList", "group": "inline" },
@@ -117,21 +96,13 @@
         { "command": "beams.copyUrl", "when": "view == beamsList && viewItem == beamPublished", "group": "2_actions" },
         { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
-        { "command": "beams.saveSessionProfile", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.container.open", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.container.syncNow", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.container.rebuild", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.delete", "when": "view == beamsList", "group": "3_danger" },
         { "command": "beams.container.teardown", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "3_danger" },
         { "command": "beams.rename", "when": "view == beamsList", "group": "2_actions" },
-        { "command": "beams.vnc.setup", "when": "view == beamsList", "group": "2_actions" },
-        { "command": "beams.vnc.connect", "when": "view == beamsList && viewItem =~ /hasVnc/", "group": "2_actions" },
-        { "command": "beams.vnc.disconnect", "when": "view == beamsList && viewItem =~ /hasVnc/", "group": "2_actions" },
-        { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFileChanged", "group": "inline" },
-        { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
-        { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == builtinSessionProfile", "group": "inline" },
-        { "command": "beams.updateSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
-        { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" }
+        { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFileChanged", "group": "inline" }
       ],
       "scm/title": [
         { "command": "beams.gitCommit", "when": "scmProvider == beam-git", "group": "navigation" },
@@ -210,18 +181,6 @@
           "type": "string",
           "default": "debian:bookworm-slim",
           "description": "Base Docker image for generated local debug containers"
-        },
-        "beams.vnc.localPort": {
-          "type": "number",
-          "default": 5901,
-          "minimum": 1024,
-          "maximum": 65535,
-          "description": "Local port for the VNC SSH tunnel"
-        },
-        "beams.vnc.geometry": {
-          "type": "string",
-          "default": "1920x1080",
-          "description": "VNC display resolution (WIDTHxHEIGHT)"
         }
       }
     }

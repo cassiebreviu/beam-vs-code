@@ -45,11 +45,9 @@ It notifies registered `PollConsumer` implementors. Polling pauses when VS Code 
 | `scmCommands.ts` | Stage/unstage/commit/discard git commands over `tsh beams exec` |
 | `events.ts` | Streams chronological events parsed from Claude JSONL transcripts under `/home/beams/.claude/projects/` |
 | `ssh.ts` | Manages `~/.ssh/config` between `# BEGIN Teleport Beams` / `# END Teleport Beams` markers for Remote-SSH |
-| `templates.ts` | Built-in beam creation template catalog consumed by `beams.create` and `localContainer.ts`'s Dockerfile generation (custom template capture was removed — see Session Profiles) |
+| `templates.ts` | Built-in beam creation template catalog consumed by `beams.create` and `localContainer.ts`'s Dockerfile generation |
 | `commands.ts` | Registers all `beams.*` VS Code commands |
 | `fileDecorations.ts` | Git status badge decorations on files in the file explorer |
-| `sessionProfiles.ts` | Session Profiles storage (git ref + summary + metadata) and beam-side capture/apply helpers |
-| `sessionProfilesProvider.ts` / `sessionProfileItem.ts` | `TreeDataProvider`/`TreeItem` for the Session Profiles panel |
 
 ### Virtual filesystem schemes
 
@@ -64,17 +62,6 @@ The `BeamGitScmProvider` implements `QuickDiffProvider.provideOriginalResource()
 1. Uses the `.beams.sh` cluster domain reported by `tsh status`
 2. Patches the `ProxyCommand` in any existing `tsh config` output to use `tsh proxy ssh` with the beam alias
 3. Inserts specific `vscode--<beamId>.<cluster>` `Host` entries before wildcard entries so they match first
-
-### Session Profiles
-
-Local prototype of the "Beams Task Profiles" RFD's `save-session`/`resume-session` workflow — `tsh` has no CLI support for this yet, so `sessionProfiles.ts` stores profiles entirely on the client under `~/.teleport/beams/session-profiles/<task-id>/{profile.json,summary.md}` rather than S3.
-
-- **Save** (`beams.saveSessionProfile`): detects the repo root under `/home/beams` on the selected beam (git state capture is skipped, not an error, if none is found — e.g. a beam with no repo yet), captures `git rev-parse --abbrev-ref HEAD` + `git rev-parse HEAD` + `git config --get remote.origin.url`, then asks the beam's own `claude` CLI to draft the summary (`generateSessionSummary` in `sessionProfiles.ts`, via `claude --continue -p` at the default read-only permission mode, grounded with `git log`/`git status` output folded into the prompt). Falls back to a What was tried/Decisions made/What's left template (noting the specific auto-draft failure) if Claude produces nothing. Saves immediately — no confirmation step — then opens the saved `summary.md` itself (not a scratch buffer) so further edits go straight back to disk.
-- **Update** (`beams.updateSessionProfile`, from the Session Profiles panel's inline actions): re-runs the same capture-and-save flow against a profile's stored `taskId`/`beamId` (prompting for a different beam only if the original one is gone), overwriting `profile.json`/`summary.md` in place — `createdAt`/`createdBy` are preserved. Works for both session and setup profiles.
-- **Resume** (`beams.resumeSessionProfile`): if the target beam doesn't have the repo yet, clones it from the recorded `remoteUrl` first, then checks out the recorded branch/commit, then writes the summary two ways: `.claude/session-memory/<task-id>.md` in the repo (human-readable, layered on top of the repo's own `CLAUDE.md`), and — via `appendSessionSummaryToUserMemory` in `sessionProfiles.ts` — into `/home/beams/.claude/CLAUDE.md`, the beam's *user*-level memory file that Claude Code auto-loads into every session without being asked (unlike the per-repo file, which needs something to explicitly point at it). That append is idempotent, replacing an earlier `<!-- BEGIN/END session-memory:<task-id> -->` block for the same task instead of duplicating it. Because the context is already auto-loaded, opening a terminal afterward just runs plain `claude` — no initial "go read this file" prompt needed. (An earlier attempt tried synthesizing/replaying a Claude Code on-disk session transcript so the task would show up directly under `/resume`'s picker — that on-disk JSONL schema turned out to be too undocumented/fragile to reproduce reliably and was reverted; the user-memory approach here is the current mechanism for carrying context into a resumed session.)
-- **Delete** (`beams.deleteSessionProfile`): removes the local profile directory.
-- Per the RFD, code changes always go through the normal git/commit path — profiles carry summary + git ref only, never uncommitted diffs.
-- The RFD's scan-before-write/scan-before-load content check is **not implemented** in this MVP; summaries are treated as trusted input.
 
 ### GitHub integration
 

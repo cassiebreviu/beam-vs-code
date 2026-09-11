@@ -77,6 +77,32 @@ export async function waitForBeamReady(id: string, timeoutMs = 60000): Promise<v
     throw new Error(`Beam "${id}" did not become ready within ${timeoutMs / 1000}s`);
 }
 
+export async function detectRepoRoot(beamId: string): Promise<string | undefined> {
+    try {
+        const output = await execOnBeam(beamId, ['git', '-C', '/home/beams', 'rev-parse', '--show-toplevel'], 10000);
+        const root = output.trim();
+        if (root) {
+            return root;
+        }
+    } catch { /* no repo at /home/beams */ }
+
+    try {
+        // NOTE: tsh beams exec joins the argv into one remote command line rather than
+        // preserving argv boundaries, so a `['bash', '-c', '<compound command>']` wrapper
+        // has its script truncated to just the first word by the outer shell. Pass
+        // compound commands as a single string element instead — no bash -c wrapper.
+        const output = await execOnBeam(beamId, [
+            'find /home/beams -maxdepth 2 -name .git -type d -print -quit',
+        ], 10000);
+        const gitDir = output.trim();
+        if (gitDir) {
+            return gitDir.replace(/\/\.git$/, '');
+        }
+    } catch { /* nothing found */ }
+
+    return undefined;
+}
+
 // `tsh beams exec` joins its argv into a single remote command line rather than preserving
 // argument boundaries (confirmed empirically — a multi-element `command` array arrives on the
 // beam as one space-joined string re-parsed by the remote shell). Any value that isn't a fixed

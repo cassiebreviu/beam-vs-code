@@ -11,7 +11,6 @@ Manage and connect to Teleport Beams directly from VS Code. Create, monitor, and
 - **Terminal** — open a tsh SSH session in the integrated terminal
 - **Source Control** — stage, unstage, commit, discard, push, and open PRs from the native SCM panel
 - **Templates** — provision new beams from built-in starter templates
-- **Session Profiles** — checkpoint a task's git state + session summary so you can resume on a fresh beam
 - **Local Debug Containers** — mirror a beam's workspace into a local Docker container
 - **Export** — download beam files as a tar.gz archive
 - **GitHub credentials** — PAT, OAuth, or Teleport Git Proxy authentication for git operations
@@ -59,15 +58,6 @@ Press `F5` in VS Code to launch the Extension Development Host.
    - `$(remote)` — open a Remote-SSH session in a new VS Code window
    - `$(terminal)` — open a tsh SSH terminal
 
-## Session Profiles
-
-A **Session Profile** checkpoints where you left off on a task: the git branch/commit plus a short markdown summary of what was tried, decisions made, and what's left. Profiles are stored locally under `~/.teleport/beams/session-profiles/<task-id>/`. Code changes always go through your normal git commit/push flow.
-
-- **Save** (right-click a beam) — captures git state and auto-drafts a summary via the beam's `claude` CLI, then opens `summary.md` for editing.
-- **Update** (inline action on an existing profile) — re-captures from the beam's current state.
-- **Resume** (command palette or panel) — checks out the recorded branch/commit on a target beam and injects the summary into Claude's session memory.
-- **Delete** — removes the local profile.
-
 ## Commands
 
 | Command | Description |
@@ -83,7 +73,6 @@ A **Session Profile** checkpoints where you left off on a task: the git branch/c
 | Beams: Run on Beam | Run a command on a beam and publish its port |
 | Beams: Setup GitHub on Beam | Configure git identity and GitHub auth |
 | Beams: Commit / Push / Create Pull Request | Git operations from the SCM panel |
-| Beams: Save / Update / Resume / Delete Session Profile | Session profile management |
 | Beams: Local Debug Container (Open/Sync/Rebuild/Delete) | Manage a local Docker mirror |
 
 See the Command Palette (`Cmd+Shift+P` → "Beams:") for the full set.

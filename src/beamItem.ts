@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { Beam } from './tsh';
 import { getLocalContainerRecord } from './localContainer';
-import { getVncManager } from './vnc';
 
 let _labelStore: vscode.Memento | undefined;
 export function setBeamLabelStore(store: vscode.Memento): void { _labelStore = store; }
@@ -24,11 +23,10 @@ export class BeamItem extends vscode.TreeItem {
             : `${remaining}m`;
 
         const hasLocalContainer = getLocalContainerRecord(beam.id)?.enabled === true;
-        const hasVnc = getVncManager()?.isVncActive(beam.id) === true;
 
-        this.description = `${customLabel ? beam.id + ' · ' : ''}expires in ${timeStr}${hasLocalContainer ? ' · local container' : ''}${hasVnc ? ' · vnc' : ''}`;
-        this.tooltip = `UUID: ${beam.uuid}\nOwner: ${beam.owner}\nExpires: ${beam.expires}${beam.url ? `\nURL: ${beam.url}` : ''}${hasLocalContainer ? '\nLocal debug container: enabled' : ''}${hasVnc ? '\nVNC: active' : ''}`;
-        this.contextValue = (beam.url ? 'beamPublished' : 'beam') + (hasLocalContainer ? '-hasLocalContainer' : '') + (hasVnc ? '-hasVnc' : '');
+        this.description = `${customLabel ? beam.id + ' · ' : ''}expires in ${timeStr}${hasLocalContainer ? ' · local container' : ''}`;
+        this.tooltip = `UUID: ${beam.uuid}\nOwner: ${beam.owner}\nExpires: ${beam.expires}${beam.url ? `\nURL: ${beam.url}` : ''}${hasLocalContainer ? '\nLocal debug container: enabled' : ''}`;
+        this.contextValue = (beam.url ? 'beamPublished' : 'beam') + (hasLocalContainer ? '-hasLocalContainer' : '');
         this.iconPath = new vscode.ThemeIcon(beam.url ? 'globe' : 'vm');
 
         this.command = {

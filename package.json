@@ -14,7 +14,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
-  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamActivity", "onView:beamEvents", "onView:beamSessionProfiles", "onCommand:beams.connect", "onFileSystem:beam-git"],
+  "activationEvents": ["onView:beamClusters", "onView:beamsList", "onView:beamFiles", "onView:beamEvents", "onView:beamSessionProfiles", "onCommand:beams.connect", "onFileSystem:beam-git"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -39,10 +39,6 @@
         {
           "id": "beamFiles",
           "name": "Files"
-        },
-        {
-          "id": "beamActivity",
-          "name": "Agent Activity"
         },
         {
           "id": "beamEvents",

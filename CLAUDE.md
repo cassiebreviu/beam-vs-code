@@ -43,8 +43,7 @@ It notifies registered `PollConsumer` implementors. Polling pauses when VS Code 
 | `polling.ts` | `BeamPoller` — polls git status + file mtimes, fans out to consumers |
 | `scm.ts` | `BeamGitScmProvider` — VS Code SCM panel, consumes porcelain output from BeamPoller |
 | `scmCommands.ts` | Stage/unstage/commit/discard git commands over `tsh beams exec` |
-| `activity.ts` | Parses Claude JSONL transcripts from `/home/beams/.claude/projects/` for token/cost display |
-| `events.ts` | Streams chronological events from the same JSONL transcript |
+| `events.ts` | Streams chronological events parsed from Claude JSONL transcripts under `/home/beams/.claude/projects/` |
 | `ssh.ts` | Manages `~/.ssh/config` between `# BEGIN Teleport Beams` / `# END Teleport Beams` markers for Remote-SSH |
 | `templates.ts` | Built-in beam creation template catalog consumed by `beams.create` and `localContainer.ts`'s Dockerfile generation (custom template capture was removed — see Session Profiles) |
 | `commands.ts` | Registers all `beams.*` VS Code commands |
@@ -65,10 +64,6 @@ The `BeamGitScmProvider` implements `QuickDiffProvider.provideOriginalResource()
 1. Uses the `.beams.sh` cluster domain reported by `tsh status`
 2. Patches the `ProxyCommand` in any existing `tsh config` output to use `tsh proxy ssh` with the beam alias
 3. Inserts specific `vscode--<beamId>.<cluster>` `Host` entries before wildcard entries so they match first
-
-### Agent activity parsing
-
-`activity.ts` reads the most-recently-modified JSONL file under `/home/beams/.claude/projects/` (excluding subagent dirs). It deduplicates token counts by `msg.id` (multiple JSONL lines share the same `id` for split content blocks) and matches `tool_use` blocks to their `tool_result` responses by `tool_use_id`.
 
 ### Session Profiles
 

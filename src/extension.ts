@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
-import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
 import { ClustersProvider } from './clusters';
 import { SessionProfilesProvider } from './sessionProfilesProvider';
@@ -17,7 +16,6 @@ import { ContainerSyncEngine } from './containerSync';
 export function activate(context: vscode.ExtensionContext): void {
     const provider = new BeamsProvider();
     const fileExplorer = new BeamFileExplorer();
-    const activityProvider = new AgentActivityProvider();
     const eventsProvider = new AgentEventsProvider();
     const clustersProvider = new ClustersProvider();
     const sessionProfilesProvider = new SessionProfilesProvider();
@@ -59,11 +57,6 @@ export function activate(context: vscode.ExtensionContext): void {
         showCollapseAll: true,
     });
 
-    vscode.window.createTreeView('beamActivity', {
-        treeDataProvider: activityProvider,
-        showCollapseAll: false,
-    });
-
     vscode.window.createTreeView('beamEvents', {
         treeDataProvider: eventsProvider,
         showCollapseAll: false,
@@ -99,7 +92,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, activityProvider, eventsProvider, sessionProfilesProvider, poller, () => scmProvider, containerSyncEngine);
+    registerCommands(context, provider, fileExplorer, eventsProvider, sessionProfilesProvider, poller, () => scmProvider, containerSyncEngine);
     registerScmCommands(context, () => scmProvider, () => poller);
 
     // Hook beam selection to start SCM integration
@@ -117,7 +110,6 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     context.subscriptions.push({ dispose: () => provider.dispose() });
-    context.subscriptions.push({ dispose: () => activityProvider.stop() });
     context.subscriptions.push({ dispose: () => eventsProvider.stop() });
     context.subscriptions.push({ dispose: () => clustersProvider.dispose() });
     context.subscriptions.push({ dispose: () => poller.dispose() });

@@ -7,7 +7,6 @@ import { openBeamTerminal } from './terminal';
 import { getAllTemplates } from './templates';
 import { setupGithubOnBeam, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
-import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
 import { SessionProfilesProvider } from './sessionProfilesProvider';
 import { SessionProfileItem } from './sessionProfileItem';
@@ -51,7 +50,6 @@ export function registerCommands(
     context: vscode.ExtensionContext,
     provider: BeamsProvider,
     fileExplorer: BeamFileExplorer,
-    activityProvider: AgentActivityProvider,
     eventsProvider: AgentEventsProvider,
     sessionProfilesProvider: SessionProfilesProvider,
     poller?: import('./polling').BeamPoller,
@@ -64,7 +62,6 @@ export function registerCommands(
                 return;
             }
             fileExplorer.setBeam(item.beam);
-            activityProvider.setBeam(item.beam);
             eventsProvider.setBeam(item.beam);
             if (poller) {
                 await poller.setBeam(item.beam.id);

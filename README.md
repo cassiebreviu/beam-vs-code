@@ -6,7 +6,6 @@ Manage and connect to Teleport Beams directly from VS Code. Create, monitor, and
 
 - **Beams sidebar** — list, create, and delete beams
 - **File explorer** — browse beam files without SSH
-- **Agent Activity** — live token usage, cost estimation, and tool call tracking
 - **Agent Events** — chronological stream of Claude session events
 - **Remote-SSH** — one-click VS Code Remote-SSH connection to any beam
 - **Terminal** — open a tsh SSH session in the integrated terminal
@@ -55,7 +54,7 @@ Press `F5` in VS Code to launch the Extension Development Host.
 1. Open the **Beams** panel in the activity bar (left sidebar).
 2. Click **Login** (key icon) if not already authenticated.
 3. Click **Create Beam** (+) to spin up a new VM.
-4. Click a beam to select it — the Files, Agent Activity, and Agent Events panels populate.
+4. Click a beam to select it — the Files and Agent Events panels populate.
 5. Use the inline buttons on each beam:
    - `$(remote)` — open a Remote-SSH session in a new VS Code window
    - `$(terminal)` — open a tsh SSH terminal

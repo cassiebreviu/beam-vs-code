@@ -7,7 +7,14 @@ export class SessionProfileItem extends vscode.TreeItem {
 
         const tooltip = [`Task: ${profile.taskId}`];
 
-        if (profile.gitBranch) {
+        if (profile.builtin) {
+            this.description = profile.setup?.autoPublish ? 'built-in · auto-publish' : 'built-in';
+            this.iconPath = new vscode.ThemeIcon('package');
+            tooltip.push(
+                `Setup commands: ${profile.setup?.commands.length ?? 0}`,
+                `Auto-publish: ${profile.setup?.autoPublish ? 'yes' : 'no'}`,
+            );
+        } else if (profile.gitBranch) {
             const shortSha = (profile.gitCommitSha ?? '').slice(0, 7);
             this.description = `${profile.gitBranch}@${shortSha}`;
             this.iconPath = new vscode.ThemeIcon('history');
@@ -17,7 +24,7 @@ export class SessionProfileItem extends vscode.TreeItem {
             this.iconPath = new vscode.ThemeIcon('server-environment');
             tooltip.push(
                 `Setup commands: ${profile.setup.commands.length}`,
-                `Auto-publish: ${profile.setup.autoPublish ? 'yes' : 'no'}`,
+                `Auto-publish: ${profile.setup?.autoPublish ? 'yes' : 'no'}`,
             );
         } else {
             this.iconPath = new vscode.ThemeIcon('history');
@@ -32,7 +39,7 @@ export class SessionProfileItem extends vscode.TreeItem {
             `Updated: ${profile.updatedAt}`,
         );
         this.tooltip = tooltip.join('\n');
-        this.contextValue = 'sessionProfile';
+        this.contextValue = profile.builtin ? 'builtinSessionProfile' : 'sessionProfile';
 
         this.command = {
             command: 'beams.viewSessionProfile',

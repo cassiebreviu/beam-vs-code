@@ -24,7 +24,235 @@ export interface SessionProfile {
     createdAt: string;
     updatedAt: string;
     setup?: SessionProfileSetup;
+    builtin?: boolean;
 }
+
+export const builtinSetupProfiles: SessionProfile[] = [
+    {
+        taskId: 'builtin-vnc-desktop',
+        label: 'VNC Desktop',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y tigervnc-standalone-server dbus-x11 openbox tint2 thunar firefox-esr',
+                'cat > /tmp/start-vnc.sh << \'VNCEOF\'\n#!/bin/bash\nrm -f /tmp/.X1-lock /tmp/.X11-unix/X1 2>/dev/null\nXtigervnc :1 -geometry 1920x1080 -depth 24 -rfbport 5901 -SecurityTypes None &\nsleep 2\nexport DISPLAY=:1\nopenbox &\ntint2 &\nvncconfig -nowin &\ncode --no-sandbox --disable-gpu &\nVNCEOF\nchmod +x /tmp/start-vnc.sh',
+                'setsid /tmp/start-vnc.sh > /tmp/vnc.log 2>&1 & sleep 3 && pgrep Xtigervnc > /dev/null && echo vnc-ready',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-vscode-server',
+        label: 'VS Code Server',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://code-server.dev/install.sh | sh 2>&1 | tail -5',
+                'nohup /usr/bin/code-server --bind-addr 0.0.0.0:8080 --auth none > /tmp/code-server.log 2>&1 & sleep 3 && pgrep -f code-server > /dev/null && echo code-server-started',
+            ],
+            autoPublish: true,
+        },
+    },
+    {
+        taskId: 'builtin-python',
+        label: 'Python',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-venv',
+                'pip3 install --break-system-packages black ruff pyright ipython pytest',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-node',
+        label: 'Node.js',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs',
+                'npm install -g typescript eslint prettier ts-node @types/node',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-go',
+        label: 'Go',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | sudo tar -C /usr/local -xz && echo "export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin" >> ~/.bashrc && export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin',
+                'go install golang.org/x/tools/gopls@latest && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && go install mvdan.cc/gofumpt@latest',
+            ],
+            autoPublish: false,
+        },
+    },
+    {
+        taskId: 'builtin-chat-ui',
+        label: 'Claude Chat UI',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip 2>&1 | tail -3 && pip3 install --break-system-packages --no-warn-script-location anthropic fastapi uvicorn python-multipart 2>&1 | tail -3',
+                `cat > /home/beams/chat-server.py << 'CHATEOF'
+import os, json, base64
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+import anthropic, uvicorn
+
+app = FastAPI()
+client = anthropic.Anthropic()
+
+HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Beam Chat</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#eee;height:100vh;display:flex;flex-direction:column}
+#header{padding:12px 20px;background:#16213e;border-bottom:1px solid #0f3460;font-size:14px;color:#94a3b8}
+#messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:80%;padding:12px 16px;border-radius:12px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:#0f3460;color:#e2e8f0}
+.msg.assistant{align-self:flex-start;background:#1e293b;color:#e2e8f0}
+.msg img{max-width:300px;border-radius:8px;margin-top:8px}
+#input-area{padding:16px 20px;background:#16213e;border-top:1px solid #0f3460;display:flex;gap:8px;align-items:center}
+#input{flex:1;padding:10px 14px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;font-size:14px;resize:none;min-height:42px;max-height:120px}
+#input:focus{outline:none;border-color:#3b82f6}
+button{padding:10px 16px;border-radius:8px;border:none;cursor:pointer;font-size:14px;transition:background .2s}
+#send{background:#3b82f6;color:white}
+#send:hover{background:#2563eb}
+#send:disabled{background:#334155;cursor:not-allowed}
+.icon-btn{background:#1e293b;color:#94a3b8;width:42px;height:42px;display:flex;align-items:center;justify-content:center;border:1px solid #334155}
+.icon-btn:hover{background:#334155}
+.icon-btn.recording{background:#dc2626;color:white;border-color:#dc2626}
+#file-input{display:none}
+.typing{color:#64748b;font-style:italic;padding:8px 16px}
+</style></head><body>
+<div id="header">Beam Chat &mdash; Claude (Anthropic API)</div>
+<div id="messages"></div>
+<div id="input-area">
+<button class="icon-btn" id="img-btn" title="Upload image">&#128247;</button>
+<button class="icon-btn" id="mic-btn" title="Voice input">&#127908;</button>
+<input type="file" id="file-input" accept="image/*" multiple>
+<textarea id="input" placeholder="Type a message..." rows="1"></textarea>
+<button id="send">Send</button>
+</div>
+<script>
+const msgs=document.getElementById('messages'),inp=document.getElementById('input'),sendBtn=document.getElementById('send');
+let history=[],pendingImages=[],recognition=null;
+document.getElementById('img-btn').onclick=()=>document.getElementById('file-input').click();
+document.getElementById('file-input').onchange=async e=>{
+  for(const f of e.target.files){
+    const b64=await new Promise(r=>{const rd=new FileReader();rd.onload=()=>r(rd.result.split(',')[1]);rd.readAsDataURL(f)});
+    pendingImages.push({type:'image',source:{type:'base64',media_type:f.type,data:b64}});
+    addMsg('user','[Image: '+f.name+']');
+  }
+  e.target.value='';
+};
+const micBtn=document.getElementById('mic-btn');
+if('webkitSpeechRecognition' in window||'SpeechRecognition' in window){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recognition=new SR();recognition.continuous=false;recognition.interimResults=false;
+  recognition.onresult=e=>{inp.value+=e.results[0][0].transcript;inp.style.height='auto';inp.style.height=inp.scrollHeight+'px'};
+  recognition.onend=()=>micBtn.classList.remove('recording');
+  micBtn.onclick=()=>{if(micBtn.classList.contains('recording')){recognition.stop()}else{recognition.start();micBtn.classList.add('recording')}};
+}else{micBtn.style.display='none'}
+function addMsg(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d}
+async function send(){
+  const text=inp.value.trim();if(!text&&!pendingImages.length)return;
+  inp.value='';inp.style.height='auto';
+  const content=[...pendingImages];if(text)content.push({type:'text',text});
+  pendingImages=[];
+  if(text)addMsg('user',text);
+  history.push({role:'user',content});
+  sendBtn.disabled=true;
+  const typing=document.createElement('div');typing.className='typing';typing.textContent='Thinking...';msgs.appendChild(typing);msgs.scrollTop=msgs.scrollHeight;
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history})});
+    const data=await r.json();
+    typing.remove();
+    const reply=data.content||data.error||'No response';
+    addMsg('assistant',reply);
+    history.push({role:'assistant',content:reply});
+  }catch(e){typing.remove();addMsg('assistant','Error: '+e.message)}
+  sendBtn.disabled=false;
+}
+sendBtn.onclick=send;
+inp.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}};
+inp.oninput=()=>{inp.style.height='auto';inp.style.height=inp.scrollHeight+'px'};
+</script></body></html>"""
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return HTML
+
+@app.post("/api/chat")
+async def chat(request: Request):
+    body = await request.json()
+    messages = body.get("messages", [])
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            messages=messages,
+        )
+        text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        return {"content": text}
+    except Exception as e:
+        return {"error": str(e)}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+CHATEOF`,
+                'export PATH="$HOME/.local/bin:$PATH" && nohup python3 /home/beams/chat-server.py > /tmp/chat-server.log 2>&1 & sleep 2 && pgrep -f chat-server.py > /dev/null && echo chat-ui-started',
+            ],
+            autoPublish: true,
+        },
+    },
+    {
+        taskId: 'builtin-rust',
+        label: 'Rust',
+        beamId: '',
+        createdBy: 'Teleport Beams',
+        createdAt: '',
+        updatedAt: '',
+        builtin: true,
+        setup: {
+            commands: [
+                'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . "$HOME/.cargo/env"',
+                '. "$HOME/.cargo/env" && rustup component add rust-analyzer clippy rustfmt && cargo install cargo-watch cargo-edit',
+            ],
+            autoPublish: false,
+        },
+    },
+];
 
 function getProfilesRoot(): string {
     return path.join(os.homedir(), '.teleport', 'beams', 'session-profiles');
@@ -87,6 +315,7 @@ const FIELD_ALIASES: Record<keyof SessionProfile, string[]> = {
     createdBy: ['createdby', 'userid', 'author'],
     createdAt: ['createdat'],
     updatedAt: ['updatedat'],
+    builtin: [],
 };
 
 function normalizeKey(key: string): string {
@@ -157,22 +386,21 @@ function parseSessionProfileJson(text: string): SessionProfile | undefined {
 
 export function listSessionProfiles(): SessionProfile[] {
     const root = getProfilesRoot();
-    if (!fs.existsSync(root)) {
-        return [];
+    const userProfiles: SessionProfile[] = [];
+    if (fs.existsSync(root)) {
+        for (const taskId of fs.readdirSync(root)) {
+            const file = path.join(root, taskId, 'profile.json');
+            if (!fs.existsSync(file)) continue;
+            try {
+                const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
+                if (profile) {
+                    userProfiles.push(profile);
+                }
+            } catch { /* skip corrupt profile */ }
+        }
+        userProfiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     }
-    const profiles: SessionProfile[] = [];
-    for (const taskId of fs.readdirSync(root)) {
-        const file = path.join(root, taskId, 'profile.json');
-        if (!fs.existsSync(file)) continue;
-        try {
-            const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
-            if (profile) {
-                profiles.push(profile);
-            }
-        } catch { /* skip corrupt profile */ }
-    }
-    profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
-    return profiles;
+    return [...builtinSetupProfiles, ...userProfiles];
 }
 
 export function getSessionProfile(taskId: string): SessionProfile | undefined {

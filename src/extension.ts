@@ -4,7 +4,6 @@ import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
 import { AgentEventsProvider } from './events';
 import { ClustersProvider } from './clusters';
-import { SessionProfilesProvider } from './sessionProfilesProvider';
 import { registerCommands } from './commands';
 import { BeamPoller } from './polling';
 import { BeamGitOriginalProvider } from './gitOriginal';
@@ -12,7 +11,6 @@ import { BeamGitDecorationProvider } from './fileDecorations';
 import { BeamGitScmProvider } from './scm';
 import { registerScmCommands } from './scmCommands';
 import { ContainerSyncEngine } from './containerSync';
-import { VncManager } from './vnc';
 import { setBeamLabelStore } from './beamItem';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -21,7 +19,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const fileExplorer = new BeamFileExplorer();
     const eventsProvider = new AgentEventsProvider();
     const clustersProvider = new ClustersProvider();
-    const sessionProfilesProvider = new SessionProfilesProvider();
 
     const poller = new BeamPoller();
     const fsProvider = new BeamFileSystemProvider();
@@ -45,8 +42,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const containerSyncEngine = new ContainerSyncEngine();
     poller.addConsumer(containerSyncEngine);
 
-    const vncManager = new VncManager();
-
     vscode.window.createTreeView('beamClusters', {
         treeDataProvider: clustersProvider,
         showCollapseAll: true,
@@ -64,11 +59,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.window.createTreeView('beamEvents', {
         treeDataProvider: eventsProvider,
-        showCollapseAll: false,
-    });
-
-    vscode.window.createTreeView('beamSessionProfiles', {
-        treeDataProvider: sessionProfilesProvider,
         showCollapseAll: false,
     });
 
@@ -97,7 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, eventsProvider, sessionProfilesProvider, poller, () => scmProvider, containerSyncEngine, vncManager);
+    registerCommands(context, provider, fileExplorer, eventsProvider, poller, () => scmProvider, containerSyncEngine);
     registerScmCommands(context, () => scmProvider, () => poller);
 
     // Hook beam selection to start SCM integration
@@ -121,7 +111,6 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push({ dispose: () => scmProvider?.dispose() });
     context.subscriptions.push({ dispose: () => decorationProvider.dispose() });
     context.subscriptions.push({ dispose: () => containerSyncEngine.dispose() });
-    context.subscriptions.push({ dispose: () => vncManager.dispose() });
 }
 
 export function deactivate(): void {}

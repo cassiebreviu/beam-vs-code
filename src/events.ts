@@ -112,16 +112,21 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
         }
     }
 
+    // Scans every per-tool dotdir under the home dir (~/.claude, ~/.codex, ~/.copilot, etc.)
+    // rather than assuming Claude Code specifically, so the panel picks up whichever coding
+    // agent most recently wrote a JSONL transcript on this beam. `.vscode-server*` is excluded
+    // because VS Code's own remote server writes unrelated JSON-RPC logs there with a .jsonl
+    // extension (its internal "Agent Host Process" protocol, not a coding agent transcript).
     private async findTranscript(): Promise<string | undefined> {
         if (!this.currentBeam) return undefined;
         try {
             const output = await execOnBeam(this.currentBeam.id, [
-                'find /home/beams/.claude/projects -name "*.jsonl" -not -path "*/subagents/*" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-; ' +
-                'find /home/beams/.claude -maxdepth 1 -name "*.jsonl" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -1 | cut -d" " -f2-'
+                'find /home/beams/.[!.]* -maxdepth 6 -name "*.jsonl" -not -path "*/subagents/*" ' +
+                '-not -path "/home/beams/.vscode-server*/*" -printf "%T@ %p\\n" 2>/dev/null | ' +
+                'sort -rn | head -1 | cut -d" " -f2-'
             ]);
-            const paths = output.trim().split('\n').filter(Boolean);
-            if (paths.length === 0) return undefined;
-            return paths[0];
+            const path = output.trim();
+            return path || undefined;
         } catch {
             return undefined;
         }
@@ -144,12 +149,13 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
     }
 
     private toEvents(parsed: Record<string, unknown>): AgentEvent[] {
-        const ts = parsed.timestamp
-            ? new Date(parsed.timestamp as string).toLocaleTimeString()
-            : '';
-
+        const ts = extractTimestamp(parsed);
         const msg = parsed.message as Record<string, unknown> | undefined;
-        if (!msg) return [];
+
+        // Claude Code's transcript schema nests role/content under `message`. Other agents'
+        // JSONL (if/when present) won't necessarily match this shape, so fall back to a
+        // best-effort generic reading rather than silently dropping the line.
+        if (!msg) return toGenericEvent(parsed, ts);
 
         const role = msg.role as string | undefined;
         const content = msg.content;
@@ -272,6 +278,35 @@ export class AgentEventsProvider implements vscode.TreeDataProvider<EventItem> {
 
         return this.events.slice().reverse().map(e => new EventItem(e));
     }
+}
+
+function extractTimestamp(parsed: Record<string, unknown>): string {
+    const raw = (parsed.timestamp ?? parsed.time ?? parsed.ts ?? parsed.created_at) as string | number | undefined;
+    if (!raw) return '';
+    const date = typeof raw === 'number' ? new Date(raw) : new Date(raw);
+    return isNaN(date.getTime()) ? '' : date.toLocaleTimeString();
+}
+
+// Best-effort event for JSONL lines that don't match Claude Code's `message.role`/`content`
+// shape — covers other agents' transcripts by probing a handful of common field names instead
+// of a single fixed schema.
+function toGenericEvent(parsed: Record<string, unknown>, ts: string): AgentEvent[] {
+    const role = (parsed.role ?? parsed.type ?? parsed.event ?? parsed.kind) as string | undefined;
+    const text = extractText(parsed.content)
+        || (typeof parsed.text === 'string' ? parsed.text : '')
+        || (typeof parsed.message === 'string' ? parsed.message : '')
+        || (typeof parsed.summary === 'string' ? parsed.summary : '');
+
+    if (!text.trim()) return [];
+
+    const icon = role === 'user' ? 'account' : role === 'assistant' ? 'hubot' : 'circle-outline';
+    return [{
+        timestamp: ts,
+        type: role ?? 'event',
+        summary: truncate(text, 80),
+        detail: text,
+        icon,
+    }];
 }
 
 function extractText(content: unknown): string {

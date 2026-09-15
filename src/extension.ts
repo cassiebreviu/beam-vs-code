@@ -88,7 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
 
     registerCommands(context, provider, fileExplorer, eventsProvider, poller, () => scmProvider, containerSyncEngine);
-    registerScmCommands(context, () => scmProvider, () => poller);
+    registerScmCommands(context, () => poller);
 
     // Hook beam selection to start SCM integration
     context.subscriptions.push(

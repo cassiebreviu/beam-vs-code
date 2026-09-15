@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { BeamItem, setBeamLabel } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote, waitForBeamReady, detectRepoRoot } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, waitForBeamReady, detectRepoRoot } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { reportTshError } from './notify';
-import { setupGithubOnBeam, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
+import { setupGithubOnBeam, autoSetupGithub, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentEventsProvider } from './events';
 import {

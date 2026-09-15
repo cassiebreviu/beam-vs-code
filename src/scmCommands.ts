@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
-import { execOnBeam, shellSingleQuote } from './tsh';
-import { BeamGitScmProvider } from './scm';
 import { BeamPoller } from './polling';
-import { toOwnerRepo } from './github';
-import { reportTshError } from './notify';
 
+// Read-only git surface: the beam's repo state is shown and diffable, but nothing here
+// mutates it. Staging, commit, discard, push, and pull-request creation were all removed
+// deliberately — run those from a terminal on the beam.
 export function registerScmCommands(
     context: vscode.ExtensionContext,
-    getScm: () => BeamGitScmProvider | undefined,
     getPoller: () => BeamPoller | undefined,
 ): void {
     context.subscriptions.push(
@@ -26,130 +24,8 @@ export function registerScmCommands(
             await vscode.commands.executeCommand('vscode.diff', originalUri, workingUri, title);
         }),
 
-        vscode.commands.registerCommand('beams.gitStage', async (resourceState: vscode.SourceControlResourceState) => {
-            const poller = getPoller();
-            if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
-            const filePath = resourceState.resourceUri.path;
-            try {
-                await execOnBeam(poller.getBeamId()!, [
-                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} add ${shellSingleQuote(filePath)}`,
-                ]);
-                poller.pollNow();
-            } catch (err: unknown) {
-                reportTshError(err, { beamId: poller.getBeamId(), action: 'stage file' });
-            }
-        }),
-
-        vscode.commands.registerCommand('beams.gitUnstage', async (resourceState: vscode.SourceControlResourceState) => {
-            const poller = getPoller();
-            if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
-            const filePath = resourceState.resourceUri.path;
-            try {
-                await execOnBeam(poller.getBeamId()!, [
-                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} reset HEAD ${shellSingleQuote(filePath)}`,
-                ]);
-                poller.pollNow();
-            } catch (err: unknown) {
-                reportTshError(err, { beamId: poller.getBeamId(), action: 'unstage file' });
-            }
-        }),
-
-        vscode.commands.registerCommand('beams.gitDiscard', async (resourceState: vscode.SourceControlResourceState) => {
-            const poller = getPoller();
-            if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
-
-            const confirm = await vscode.window.showWarningMessage(
-                `Discard changes to ${resourceState.resourceUri.path.split('/').pop()}?`,
-                { modal: true },
-                'Discard'
-            );
-            if (confirm !== 'Discard') return;
-
-            const filePath = resourceState.resourceUri.path;
-            try {
-                await execOnBeam(poller.getBeamId()!, [
-                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} checkout -- ${shellSingleQuote(filePath)}`,
-                ]);
-                poller.pollNow();
-            } catch (err: unknown) {
-                reportTshError(err, { beamId: poller.getBeamId(), action: 'discard changes' });
-            }
-        }),
-
-        vscode.commands.registerCommand('beams.gitCommit', async () => {
-            const scm = getScm();
-            const poller = getPoller();
-            if (!scm || !poller?.getBeamId() || !poller.getRepoRoot()) return;
-
-            const message = scm.inputBox.value.trim();
-            if (!message) {
-                vscode.window.showErrorMessage('Enter a commit message first.');
-                return;
-            }
-
-            try {
-                await execOnBeam(poller.getBeamId()!, [
-                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} commit -m ${shellSingleQuote(message)}`,
-                ]);
-                scm.inputBox.value = '';
-                poller.pollNow();
-                vscode.window.showInformationMessage('Committed successfully.');
-            } catch (err: unknown) {
-                reportTshError(err, { beamId: poller.getBeamId(), action: 'commit' });
-            }
-        }),
-
         vscode.commands.registerCommand('beams.gitRefreshScm', () => {
             getPoller()?.pollNow();
-        }),
-
-        vscode.commands.registerCommand('beams.gitPush', async () => {
-            const poller = getPoller();
-            const beamId = poller?.getBeamId();
-            const repoRoot = poller?.getRepoRoot();
-            if (!beamId || !repoRoot) return;
-
-            try {
-                const root = shellSingleQuote(repoRoot);
-                const branch = (await execOnBeam(beamId, [`git -C ${root} rev-parse --abbrev-ref HEAD`])).trim();
-                await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Pushing "${branch}"...` },
-                    () => execOnBeam(beamId, [`git -C ${root} push -u origin ${shellSingleQuote(branch)}`], 60000)
-                );
-                vscode.window.showInformationMessage(`Pushed "${branch}" to origin.`);
-            } catch (err: unknown) {
-                reportTshError(err, { beamId, action: 'push' });
-            }
-        }),
-
-        vscode.commands.registerCommand('beams.createPullRequest', async () => {
-            const poller = getPoller();
-            const beamId = poller?.getBeamId();
-            const repoRoot = poller?.getRepoRoot();
-            if (!beamId || !repoRoot) return;
-
-            try {
-                const root = shellSingleQuote(repoRoot);
-                const branch = (await execOnBeam(beamId, [`git -C ${root} rev-parse --abbrev-ref HEAD`])).trim();
-                const remoteUrl = (await execOnBeam(beamId, [`git -C ${root} config --get remote.origin.url`])).trim();
-                if (!remoteUrl) {
-                    vscode.window.showErrorMessage('No git remote configured for this repo.');
-                    return;
-                }
-
-                await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Pushing "${branch}"...` },
-                    () => execOnBeam(beamId, [`git -C ${root} push -u origin ${shellSingleQuote(branch)}`], 60000)
-                );
-
-                // Opens in the user's own authenticated browser session — avoids needing
-                // `gh` installed/authenticated on the beam (not the case for tsh-git beams).
-                const ownerRepo = toOwnerRepo(remoteUrl);
-                const url = `https://github.com/${ownerRepo}/compare/${encodeURIComponent(branch)}?expand=1`;
-                await vscode.env.openExternal(vscode.Uri.parse(url));
-            } catch (err: unknown) {
-                reportTshError(err, { beamId, action: 'open pull request' });
-            }
         }),
     );
 }

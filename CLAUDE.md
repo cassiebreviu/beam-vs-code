@@ -48,7 +48,7 @@ It notifies registered `PollConsumer` implementors. Polling pauses when VS Code 
 | `beamFs.ts` | `FileSystemProvider` for `beam://` URIs — reads/writes remote files via `tsh beams exec` |
 | `polling.ts` | `BeamPoller` — polls git status + file mtimes, fans out to consumers |
 | `scm.ts` | `BeamGitScmProvider` — VS Code SCM panel, consumes porcelain output from BeamPoller |
-| `scmCommands.ts` | Stage/unstage/commit/discard git commands over `tsh beams exec` |
+| `scmCommands.ts` | Stage/unstage/show-diff/refresh git commands over `tsh beams exec`. Commit, discard, push, and create-pull-request were deliberately removed — do not reintroduce history-writing or remote-publishing operations here |
 | `events.ts` | Streams chronological events parsed from the most recently modified JSONL transcript under any `~/.<tool>` dotdir (e.g. `.claude`, `.codex`) — parses Claude Code's schema specifically, with a best-effort generic fallback for other agents' JSONL shapes |
 | `ssh.ts` | Manages `~/.ssh/config` between `# BEGIN Teleport Beams` / `# END Teleport Beams` markers for Remote-SSH |
 | `commands.ts` | Registers all `beams.*` VS Code commands |

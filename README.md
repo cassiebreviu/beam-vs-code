@@ -12,7 +12,7 @@ This repository contains the source for the extension — there is no separate s
 - **Agent Events** — chronological stream of agent session events, auto-detected from the most recently modified JSONL transcript under any `~/.<tool>` dotdir (Claude Code's schema is parsed natively; other agents get a best-effort generic view)
 - **Remote-SSH** — one-click VS Code Remote-SSH connection to any beam, with automatic `~/.ssh/config` management
 - **Terminal** — open a `tsh` SSH session in the integrated terminal
-- **Source Control** — native SCM panel backed by the beam's git repo: stage, unstage, commit, discard, push, and open a pull request, with QuickDiff gutter indicators against `HEAD`
+- **Source Control** — native SCM panel backed by the beam's git with QuickDiff gutter indicators against `HEAD`.
 - **File decorations** — git status badges (modified/added/untracked) on files in the beam file explorer
 - **Local Debug Containers** — mirror a beam's workspace into a local Docker container, kept in sync automatically while you work, with rebuild/teardown controls
 - **Publish / Unpublish** — expose a beam's port 8080 app publicly and copy its URL
@@ -89,8 +89,7 @@ Press `F5` in VS Code to launch the Extension Development Host (reads `.vscode/l
 | Beams: Export as Zip | Download beam contents as a `tar.gz` archive |
 | Beams: Setup GitHub on Beam | Configure git identity and GitHub auth (PAT / OAuth / Teleport Git Proxy) |
 | Beams: Show Diff | Show a file's diff against `HEAD` |
-| Beams: Commit / Push / Create Pull Request | Git operations from the SCM panel |
-| Beams: Stage / Unstage / Discard Changes | Git operations from the SCM panel |
+| Beams: Stage / Unstage File | Git staging from the SCM panel |
 | Beams: Refresh Git Status | Force a git status poll |
 | Beams: Local Debug Container — Open | Open a local Docker mirror of a beam's workspace |
 | Beams: Local Debug Container — Sync Now | Force an immediate sync pass |

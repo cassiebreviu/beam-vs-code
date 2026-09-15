@@ -179,7 +179,8 @@ export async function autoSetupGithub(
 
 // Normalise any GitHub URL variant to "owner/repo".
 // Accepts: https://github.com/owner/repo[.git], git@github.com:owner/repo[.git], owner/repo
-export function toOwnerRepo(input: string): string {
+// Only used within this module now that the create-pull-request command is gone.
+function toOwnerRepo(input: string): string {
     const m = input.trim().match(/(?:github\.com[/:])([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/);
     return m ? m[1] : input.replace(/\.git$/, '').replace(/\/+$/, '');
 }

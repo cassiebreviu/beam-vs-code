@@ -18,6 +18,70 @@ export interface TshStatus {
     validUntil: string;
 }
 
+
+// tsh colourises its diagnostics, so raw error text arrives with SGR escapes embedded
+// (e.g. "\x1b[31mERROR: \x1b[0m..."). Strip them before matching or displaying.
+export function stripAnsi(text: string): string {
+    // eslint-disable-next-line no-control-regex
+    return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+export type TshErrorKind = 'disconnected' | 'auth' | 'other';
+
+// A beam that has expired, been deleted, or stopped answering is a normal, expected
+// end-of-life condition rather than a failure the user needs to act on. `tsh` reports
+// it through several different wordings depending on how far the connection got.
+const DISCONNECT_PATTERNS = [
+    'does not exist',
+    'not found',
+    'is not running',
+    'connection refused',
+    'connection reset',
+    'context deadline exceeded',
+    'i/o timeout',
+    'no route to host',
+    'broken pipe',
+    'unexpected eof',
+    'ssh: handshake failed',
+    'failed to dial',
+    'dial tcp',
+];
+
+const AUTH_PATTERNS = [
+    'not logged in',
+    'relogin',
+    'certificate has expired',
+    'access denied',
+];
+
+export function tshErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err);
+    return stripAnsi(raw)
+        .replace(/^Command failed:[^\n]*\n?/, '')
+        .replace(/^ERROR:\s*/gm, '')
+        .trim();
+}
+
+// Disconnect patterns are checked before auth ones on purpose: when a beam is gone,
+// `tsh` first tries to re-resolve it and emits "cannot relogin in non-interactive
+// session" alongside "does not exist". Classifying that as an auth problem would send
+// the user off to `tsh login` for what is really just a dead beam.
+export function classifyTshError(err: unknown): TshErrorKind {
+    const msg = tshErrorMessage(err).toLowerCase();
+    if (DISCONNECT_PATTERNS.some(p => msg.includes(p))) {
+        return 'disconnected';
+    }
+    if (AUTH_PATTERNS.some(p => msg.includes(p))) {
+        return 'auth';
+    }
+    const code = (err as { code?: unknown } | undefined)?.code;
+    const killed = (err as { killed?: unknown } | undefined)?.killed;
+    if (code === 'ETIMEDOUT' || killed === true) {
+        return 'disconnected';
+    }
+    return 'other';
+}
+
 async function runTsh(args: string[], options?: { timeout?: number }): Promise<string> {
     const { stdout } = await exec('tsh', args, {
         timeout: options?.timeout ?? 30000,

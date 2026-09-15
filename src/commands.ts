@@ -4,7 +4,7 @@ import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
 import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, shellSingleQuote, waitForBeamReady, detectRepoRoot } from './tsh';
 import { openBeamTerminal } from './terminal';
-import { getAllTemplates } from './templates';
+import { reportTshError } from './notify';
 import { setupGithubOnBeam, autoSetupGithub, toOwnerRepo, SECRET_KEY } from './github';
 import { ensureBeamSshConfig } from './ssh';
 import { AgentEventsProvider } from './events';
@@ -83,47 +83,9 @@ export function registerCommands(
         }),
 
         vscode.commands.registerCommand('beams.create', async () => {
-            const allTemplates = getAllTemplates();
-
-            type PickItem = { label: string; description?: string; template: import('./templates').BeamTemplate };
-            const items: PickItem[] = allTemplates.map(t => ({
-                label: t.label,
-                description: t.description,
-                template: t,
-            }));
-
-            const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Select a template for the new beam' });
-            if (!picked) {
-                return;
-            }
-
-            const template = picked.template;
-
-            // Resolve conflict between template GitHub config and stored preferences
-            let useTemplateGithub = false;
-            const templateGithub = template.github;
-            if (templateGithub?.username) {
-                const cfg = vscode.workspace.getConfiguration('beams');
-                const storedUsername = cfg.get<string>('github.username');
-                const storedEmail = cfg.get<string>('github.email');
-                if (storedUsername && templateGithub.email && storedEmail && templateGithub.email !== storedEmail) {
-                    const choice = await vscode.window.showQuickPick(
-                        [
-                            { label: `Use stored identity (${storedEmail})`, useTemplate: false },
-                            { label: `Use template identity (${templateGithub.email})`, useTemplate: true },
-                        ],
-                        { placeHolder: 'Template has different git identity than your stored preferences' }
-                    );
-                    if (!choice) {
-                        return;
-                    }
-                    useTemplateGithub = choice.useTemplate;
-                }
-            }
-
-            // Ask whether to apply saved GitHub credentials (only when not using template config)
+            // Ask whether to apply saved GitHub credentials
             let applyGithubCredentials = false;
-            if (!useTemplateGithub) {
+            {
                 const cfg = vscode.workspace.getConfiguration('beams');
                 const savedUsername = cfg.get<string>('github.username');
                 const savedAuthMethod = cfg.get<string>('github.authMethod');
@@ -179,32 +141,16 @@ export function registerCommands(
 
             try {
                 const beam = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Notification, title: `Creating beam (${template.label})...` },
+                    { location: vscode.ProgressLocation.Notification, title: 'Creating beam...' },
                     async (progress) => {
                         const b = await addBeam();
                         progress.report({ message: 'Waiting for beam to be ready...' });
                         await waitForBeamReady(b.id);
-                        if (template.commands.length > 0) {
-                            progress.report({ message: 'Running template setup...' });
-                            for (const cmd of template.commands) {
-                                await execOnBeam(b.id, [cmd]);
-                            }
-                        }
                         try {
                             const status = await checkStatus();
                             if (status.loggedIn && status.cluster) {
                                 await ensureBeamSshConfig(b.id, status.cluster);
-                                if (useTemplateGithub && templateGithub) {
-                                    // Apply template's GitHub config instead of stored prefs
-                                    progress.report({ message: 'Applying template GitHub config...' });
-                                    await setupGithubOnBeam({
-                                        beamId: b.id,
-                                        username: templateGithub.username!,
-                                        email: templateGithub.email || `${templateGithub.username}@users.noreply.github.com`,
-                                        authMethod: templateGithub.authMethod || 'oauth',
-                                        cloneRepo: templateGithub.cloneRepo,
-                                    }, progress);
-                                } else if (applyGithubCredentials) {
+                                if (applyGithubCredentials) {
                                     const result = await autoSetupGithub(b.id, context, progress, true);
                                     if (result.error) {
                                         vscode.window.showWarningMessage(`GitHub auto-setup: ${result.error}`);
@@ -213,33 +159,22 @@ export function registerCommands(
                             }
                         } catch { /* non-fatal */ }
 
-                        let publishedUrl: string | undefined;
-                        if (template.autoPublish) {
-                            progress.report({ message: 'Publishing beam...' });
-                            try {
-                                publishedUrl = await publishBeam(b.id);
-                            } catch { /* non-fatal — user can publish manually */ }
-                        }
-
                         if (enableLocalContainer) {
                             progress.report({ message: 'Setting up local debug container...' });
                             try {
                                 const repoRoot = (await detectRepoRoot(b.id)) ?? '/home/beams';
                                 const record = createLocalContainerRecord(b.id, repoRoot, localContainerSyncMode);
-                                writeDockerfile(b.id, generateDockerfile(template));
+                                writeDockerfile(b.id, generateDockerfile());
                                 writeDevcontainerJson(record);
                             } catch (err: unknown) {
                                 vscode.window.showWarningMessage(`Local debug container setup failed: ${err instanceof Error ? err.message : err}`);
                             }
                         }
 
-                        return { beam: b, publishedUrl };
+                        return { beam: b };
                     }
                 );
-                const message = beam.publishedUrl
-                    ? `Beam "${beam.beam.id}" created with ${template.label} template. Published at ${beam.publishedUrl}`
-                    : `Beam "${beam.beam.id}" created with ${template.label} template.`;
-                vscode.window.showInformationMessage(message);
+                vscode.window.showInformationMessage(`Beam "${beam.beam.id}" created.`);
                 provider.refresh();
 
                 // Build the local container image in the background — not
@@ -331,7 +266,7 @@ export function registerCommands(
                 const remoteUri = vscode.Uri.parse(`vscode-remote://ssh-remote+${host}${folder}`);
                 await vscode.commands.executeCommand('vscode.openFolder', remoteUri, { forceNewWindow: true });
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to connect: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: item.beam.id, action: 'connect', refresh: () => provider.refresh() });
             }
         }),
 
@@ -363,7 +298,7 @@ export function registerCommands(
                 const doc = await vscode.workspace.openTextDocument(uri);
                 await vscode.window.showTextDocument(doc);
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to open file: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: entry.beamId, action: 'open file' });
             }
         }),
 
@@ -390,7 +325,7 @@ export function registerCommands(
                 }
                 provider.refresh();
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: item.beam.id, action: 'publish', refresh: () => provider.refresh() });
             }
         }),
 
@@ -403,7 +338,7 @@ export function registerCommands(
                 vscode.window.showInformationMessage(`Beam "${item.beam.id}" unpublished.`);
                 provider.refresh();
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to unpublish: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: item.beam.id, action: 'unpublish', refresh: () => provider.refresh() });
             }
         }),
 
@@ -565,7 +500,7 @@ export function registerCommands(
                         provider.refresh();
                         vscode.env.openExternal(vscode.Uri.parse(url));
                     } catch (err: unknown) {
-                        vscode.window.showErrorMessage(`Failed to publish: ${err instanceof Error ? err.message : err}`);
+                        reportTshError(err, { beamId: item.beam.id, action: 'publish', refresh: () => provider.refresh() });
                     }
                 }
             }
@@ -633,7 +568,7 @@ export function registerCommands(
                     vscode.commands.executeCommand('revealFileInOS', dir);
                 }
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Export failed: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: item.beam.id, action: 'export beam files', refresh: () => provider.refresh() });
             }
         }),
 

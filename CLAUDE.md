@@ -12,7 +12,11 @@ npm run install-local  # install the built .vsix into VS Code
 npm test                # compile + run test/*.test.js (node:test)
 ```
 
-There is no linter configured. The test suite is minimal (currently just `test/ssh.test.js`, covering SSH config repair) — TypeScript compilation (`tsc`) remains the primary correctness check for everything else.
+There is no linter configured. The test suite covers SSH config repair (`test/ssh.test.js`) and tsh error classification (`test/tshError.test.js`) — TypeScript compilation (`tsc`) remains the primary correctness check for everything else.
+
+### Error reporting
+
+Beams are ephemeral, so a beam vanishing mid-session is an expected condition, not a fault. Never report a raw tsh failure with `showErrorMessage` directly — route it through `reportTshError` in `notify.ts` so a disconnect surfaces as information instead of an error dialog. Note that `tsh` emits `cannot relogin in non-interactive session` *alongside* `does not exist` for a gone beam, which is why `classifyTshError` checks disconnect patterns before auth ones.
 
 Press **F5** in VS Code to launch the Extension Development Host (reads `.vscode/launch.json`).
 
@@ -37,15 +41,16 @@ It notifies registered `PollConsumer` implementors. Polling pauses when VS Code 
 | File | Role |
 |------|------|
 | `extension.ts` | Activation entry point — wires all providers together and registers the `beam://` and `beam-git://` filesystem schemes |
-| `tsh.ts` | All tsh CLI interactions; defines the `Beam` and `TshStatus` types |
+| `tsh.ts` | All tsh CLI interactions; defines the `Beam` and `TshStatus` types, plus `classifyTshError` which sorts failures into `disconnected` / `auth` / `other` |
+| `notify.ts` | `reportTshError` — picks notification severity from the error class (a gone beam is info, expired login is a warning with a Login action, anything else is an error) and dedupes repeats per beam within 30s |
 | `beamsProvider.ts` | `TreeDataProvider` for the Beams panel list |
+| `clusters.ts` | `ClustersProvider` — Clusters panel listing logged-in Teleport profiles (`active` + `profiles[]` from `tsh status --format=json`). Note this lists *profiles you have logged into*, not clusters reachable through the proxy — with a single login it renders exactly one row |
 | `beamFs.ts` | `FileSystemProvider` for `beam://` URIs — reads/writes remote files via `tsh beams exec` |
 | `polling.ts` | `BeamPoller` — polls git status + file mtimes, fans out to consumers |
 | `scm.ts` | `BeamGitScmProvider` — VS Code SCM panel, consumes porcelain output from BeamPoller |
 | `scmCommands.ts` | Stage/unstage/commit/discard git commands over `tsh beams exec` |
 | `events.ts` | Streams chronological events parsed from the most recently modified JSONL transcript under any `~/.<tool>` dotdir (e.g. `.claude`, `.codex`) — parses Claude Code's schema specifically, with a best-effort generic fallback for other agents' JSONL shapes |
 | `ssh.ts` | Manages `~/.ssh/config` between `# BEGIN Teleport Beams` / `# END Teleport Beams` markers for Remote-SSH |
-| `templates.ts` | Built-in beam creation template catalog consumed by `beams.create` and `localContainer.ts`'s Dockerfile generation |
 | `commands.ts` | Registers all `beams.*` VS Code commands |
 | `fileDecorations.ts` | Git status badge decorations on files in the file explorer |
 

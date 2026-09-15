@@ -3,6 +3,7 @@ import { execOnBeam, shellSingleQuote } from './tsh';
 import { BeamGitScmProvider } from './scm';
 import { BeamPoller } from './polling';
 import { toOwnerRepo } from './github';
+import { reportTshError } from './notify';
 
 export function registerScmCommands(
     context: vscode.ExtensionContext,
@@ -29,20 +30,28 @@ export function registerScmCommands(
             const poller = getPoller();
             if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
             const filePath = resourceState.resourceUri.path;
-            await execOnBeam(poller.getBeamId()!, [
-                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} add ${shellSingleQuote(filePath)}`,
-            ]);
-            poller.pollNow();
+            try {
+                await execOnBeam(poller.getBeamId()!, [
+                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} add ${shellSingleQuote(filePath)}`,
+                ]);
+                poller.pollNow();
+            } catch (err: unknown) {
+                reportTshError(err, { beamId: poller.getBeamId(), action: 'stage file' });
+            }
         }),
 
         vscode.commands.registerCommand('beams.gitUnstage', async (resourceState: vscode.SourceControlResourceState) => {
             const poller = getPoller();
             if (!poller?.getBeamId() || !poller.getRepoRoot()) return;
             const filePath = resourceState.resourceUri.path;
-            await execOnBeam(poller.getBeamId()!, [
-                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} reset HEAD ${shellSingleQuote(filePath)}`,
-            ]);
-            poller.pollNow();
+            try {
+                await execOnBeam(poller.getBeamId()!, [
+                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} reset HEAD ${shellSingleQuote(filePath)}`,
+                ]);
+                poller.pollNow();
+            } catch (err: unknown) {
+                reportTshError(err, { beamId: poller.getBeamId(), action: 'unstage file' });
+            }
         }),
 
         vscode.commands.registerCommand('beams.gitDiscard', async (resourceState: vscode.SourceControlResourceState) => {
@@ -57,10 +66,14 @@ export function registerScmCommands(
             if (confirm !== 'Discard') return;
 
             const filePath = resourceState.resourceUri.path;
-            await execOnBeam(poller.getBeamId()!, [
-                `git -C ${shellSingleQuote(poller.getRepoRoot()!)} checkout -- ${shellSingleQuote(filePath)}`,
-            ]);
-            poller.pollNow();
+            try {
+                await execOnBeam(poller.getBeamId()!, [
+                    `git -C ${shellSingleQuote(poller.getRepoRoot()!)} checkout -- ${shellSingleQuote(filePath)}`,
+                ]);
+                poller.pollNow();
+            } catch (err: unknown) {
+                reportTshError(err, { beamId: poller.getBeamId(), action: 'discard changes' });
+            }
         }),
 
         vscode.commands.registerCommand('beams.gitCommit', async () => {
@@ -82,7 +95,7 @@ export function registerScmCommands(
                 poller.pollNow();
                 vscode.window.showInformationMessage('Committed successfully.');
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Commit failed: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId: poller.getBeamId(), action: 'commit' });
             }
         }),
 
@@ -105,7 +118,7 @@ export function registerScmCommands(
                 );
                 vscode.window.showInformationMessage(`Pushed "${branch}" to origin.`);
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Push failed: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId, action: 'push' });
             }
         }),
 
@@ -135,7 +148,7 @@ export function registerScmCommands(
                 const url = `https://github.com/${ownerRepo}/compare/${encodeURIComponent(branch)}?expand=1`;
                 await vscode.env.openExternal(vscode.Uri.parse(url));
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to open pull request: ${err instanceof Error ? err.message : err}`);
+                reportTshError(err, { beamId, action: 'open pull request' });
             }
         }),
     );

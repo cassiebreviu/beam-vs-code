@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { BeamItem } from './beamItem';
-import { listBeams, isTshAvailable } from './tsh';
+import { listBeams, isTshAvailable, classifyTshError, tshErrorMessage } from './tsh';
 
 export class BeamsProvider implements vscode.TreeDataProvider<BeamItem> {
     private _onDidChangeTreeData = new vscode.EventEmitter<BeamItem | undefined | null>();
@@ -39,9 +39,10 @@ export class BeamsProvider implements vscode.TreeDataProvider<BeamItem> {
             const beams = await listBeams();
             return beams.map(b => new BeamItem(b));
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (msg.includes('not logged in') || msg.includes('relogin')) {
+            if (classifyTshError(err) === 'auth') {
                 vscode.window.showWarningMessage('Not logged in to Teleport. Run: tsh login');
+            } else {
+                console.warn(`Beams: failed to list beams: ${tshErrorMessage(err)}`);
             }
             return [];
         }

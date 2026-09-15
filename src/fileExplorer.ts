@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Beam, execOnBeam } from './tsh';
+import { reportTshError } from './notify';
 import { PollConsumer } from './polling';
 
 interface FileEntry {
@@ -131,8 +132,7 @@ export class BeamFileExplorer implements vscode.TreeDataProvider<FileItem>, Poll
 
             return entries;
         } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            vscode.window.showErrorMessage(`Failed to list files: ${msg}`);
+            reportTshError(err, { beamId, action: 'list files' });
             return [];
         }
     }

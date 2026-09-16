@@ -6,7 +6,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execOnBeam, scpFromBeam } from './tsh';
 import { PollConsumer } from './polling';
-import { getLocalContainerRecord, updateLastSyncSignature, getWorkspaceDir, LocalContainerRecord } from './localContainer';
+import { getLocalContainerRecord, updateLastSyncSignature, getWorkspaceDir } from './localContainer';
 
 const exec = promisify(execFile);
 

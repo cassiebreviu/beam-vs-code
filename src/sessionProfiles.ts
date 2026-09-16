@@ -2,16 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execOnBeam, shellSingleQuote } from './tsh';
+import { AgentAdapter, detectAgents, findMostRecentSessionCwd } from './agents';
 
-// A profile is either (or both):
-// - a resumable work session: repoRoot/gitBranch/gitCommitSha/remoteUrl capture where you left off
-// - an environment setup profile: `setup` describes commands to provision a beam (e.g. installing
-//   dev tooling), with no git state of its own — applied via the same "resume" action.
-export interface SessionProfileSetup {
-    commands: string[];
-    autoPublish?: boolean;
-}
-
+// A profile captures a resumable work session: repoRoot/gitBranch/gitCommitSha/remoteUrl,
+// plus an AI-drafted (or manually edited) summary, so you can pick up where you left off
+// on a fresh beam.
 export interface SessionProfile {
     taskId: string;
     label: string;
@@ -23,7 +18,6 @@ export interface SessionProfile {
     createdBy: string;
     createdAt: string;
     updatedAt: string;
-    setup?: SessionProfileSetup;
 }
 
 function getProfilesRoot(): string {
@@ -74,9 +68,6 @@ function fromRfdShape(raw: RawProfile): SessionProfile {
 // (lowercased, punctuation-stripped) key, so "task_id", "taskId", and "git.branch" /
 // "gitBranch" all resolve the same way.
 const FIELD_ALIASES: Record<keyof SessionProfile, string[]> = {
-    // `setup` is a structured object, not a string leaf — dynamic matching only ever
-    // produces string fields; setup profiles are always created explicitly instead.
-    setup: [],
     taskId: ['taskid', 'id'],
     label: ['label', 'name', 'title'],
     beamId: ['beamid'],
@@ -107,16 +98,6 @@ function flattenLeaves(obj: unknown, out: Map<string, unknown> = new Map()): Map
     return out;
 }
 
-function parseSetup(raw: unknown): SessionProfileSetup | undefined {
-    if (raw === null || typeof raw !== 'object') return undefined;
-    const commands = (raw as RawProfile).commands;
-    if (!Array.isArray(commands) || !commands.every(c => typeof c === 'string') || commands.length === 0) {
-        return undefined;
-    }
-    const autoPublish = (raw as RawProfile).autoPublish;
-    return { commands, autoPublish: autoPublish === true };
-}
-
 function fromDynamicMatch(raw: RawProfile): SessionProfile {
     const leaves = flattenLeaves(raw);
     const pick = (aliases: string[]): string => {
@@ -131,9 +112,6 @@ function fromDynamicMatch(raw: RawProfile): SessionProfile {
 
     const taskId = pick(FIELD_ALIASES.taskId);
     const remoteUrl = pick(FIELD_ALIASES.remoteUrl);
-    // `setup` is a structured object, not a string leaf — flattenLeaves() only collects
-    // leaves, so it's read directly off the raw object instead of via pick().
-    const setup = parseSetup(raw.setup);
     return {
         taskId,
         label: pick(FIELD_ALIASES.label) || taskId,
@@ -145,7 +123,6 @@ function fromDynamicMatch(raw: RawProfile): SessionProfile {
         createdBy: pick(FIELD_ALIASES.createdBy),
         createdAt: pick(FIELD_ALIASES.createdAt),
         updatedAt: pick(FIELD_ALIASES.updatedAt) || pick(FIELD_ALIASES.createdAt),
-        ...(setup ? { setup } : {}),
     };
 }
 
@@ -157,21 +134,20 @@ function parseSessionProfileJson(text: string): SessionProfile | undefined {
 
 export function listSessionProfiles(): SessionProfile[] {
     const root = getProfilesRoot();
-    if (!fs.existsSync(root)) {
-        return [];
-    }
     const profiles: SessionProfile[] = [];
-    for (const taskId of fs.readdirSync(root)) {
-        const file = path.join(root, taskId, 'profile.json');
-        if (!fs.existsSync(file)) continue;
-        try {
-            const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
-            if (profile) {
-                profiles.push(profile);
-            }
-        } catch { /* skip corrupt profile */ }
+    if (fs.existsSync(root)) {
+        for (const taskId of fs.readdirSync(root)) {
+            const file = path.join(root, taskId, 'profile.json');
+            if (!fs.existsSync(file)) continue;
+            try {
+                const profile = parseSessionProfileJson(fs.readFileSync(file, 'utf-8'));
+                if (profile) {
+                    profiles.push(profile);
+                }
+            } catch { /* skip corrupt profile */ }
+        }
+        profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     }
-    profiles.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
     return profiles;
 }
 
@@ -211,32 +187,6 @@ export function deleteSessionProfile(taskId: string): void {
     if (fs.existsSync(dir)) {
         fs.rmSync(dir, { recursive: true, force: true });
     }
-}
-
-export async function detectRepoRoot(beamId: string): Promise<string | undefined> {
-    try {
-        const output = await execOnBeam(beamId, ['git', '-C', '/home/beams', 'rev-parse', '--show-toplevel'], 10000);
-        const root = output.trim();
-        if (root) {
-            return root;
-        }
-    } catch { /* no repo at /home/beams */ }
-
-    try {
-        // NOTE: tsh beams exec joins the argv into one remote command line rather than
-        // preserving argv boundaries, so a `['bash', '-c', '<compound command>']` wrapper
-        // has its script truncated to just the first word by the outer shell. Pass
-        // compound commands as a single string element instead — no bash -c wrapper.
-        const output = await execOnBeam(beamId, [
-            'find /home/beams -maxdepth 2 -name .git -type d -print -quit',
-        ], 10000);
-        const gitDir = output.trim();
-        if (gitDir) {
-            return gitDir.replace(/\/\.git$/, '');
-        }
-    } catch { /* nothing found */ }
-
-    return undefined;
 }
 
 export async function captureGitRef(beamId: string, repoRoot: string): Promise<{ branch: string; sha: string }> {
@@ -287,19 +237,24 @@ export interface SessionSummaryResult {
 }
 
 // RFD: "Beams summarizes the session into the profile format." The beam already runs
-// `claude` for the agentic session itself, so ask that same CLI (in headless -p mode,
-// resuming its most recent conversation in this repo) to draft the summary. Left at the
-// default ("manual") permission mode, which is reads-only and needs no interactive
-// approval — plan mode is for proposing edits and doesn't fit a read-only reporting task
-// like this (and its "present a plan, ask how to proceed" flow assumes a human is there
-// to answer). `recentActivity` (git log/status) is folded into the prompt so the draft
-// stays grounded even when `--continue` finds no prior conversation to resume.
+// whichever coding-agent CLI is installed for the agentic session itself, so ask that
+// same CLI (in headless mode, resuming its most recent conversation in this repo) to
+// draft the summary — detected via agents.ts rather than assumed to be Claude Code, so
+// this works on a beam provisioned with any supported agent. `recentActivity` (git
+// log/status) is folded into the prompt so the draft stays grounded even when the
+// resumed conversation finds no prior session to continue.
 export async function generateSessionSummary(
     beamId: string,
     repoRoot: string,
     label: string,
     recentActivity?: string,
 ): Promise<SessionSummaryResult> {
+    const agents = await detectAgents(beamId);
+    const agent = agents[0];
+    if (!agent) {
+        return { error: 'No supported coding agent CLI (claude, codex) found on this beam.' };
+    }
+
     const prompt = [
         `Write a concise session summary for a task-resumption profile called "${label}".`,
         'Use exactly this markdown structure with no extra preamble or closing remarks:',
@@ -315,11 +270,15 @@ export async function generateSessionSummary(
         ...(recentActivity ? ['', 'Recent git activity for additional context:', '', recentActivity] : []),
     ].join('\n');
 
-    const cmd = `cd ${shellSingleQuote(repoRoot)} && claude --continue -p ${shellSingleQuote(prompt)}`;
+    // Prefer wherever the most recently active session on this beam actually ran (see
+    // findMostRecentSessionCwd) over repoRoot, since a beam is normally dedicated to one
+    // task at a time and the real conversation may not have run from inside the repo.
+    const cwd = await findMostRecentSessionCwd(beamId) ?? repoRoot;
+    const cmd = `cd ${shellSingleQuote(cwd)} && ${agent.buildSummaryCommand(prompt)}`;
     try {
         const output = await execOnBeam(beamId, [cmd], 120000);
         const text = output.trim();
-        return text ? { text } : { error: 'Claude produced no output.' };
+        return text ? { text } : { error: `${agent.id} produced no output.` };
     } catch (err: unknown) {
         const stderr = typeof (err as { stderr?: unknown })?.stderr === 'string' ? (err as { stderr: string }).stderr.trim() : '';
         const message = stderr || (err instanceof Error ? err.message : String(err));
@@ -327,7 +286,7 @@ export async function generateSessionSummary(
     }
 }
 
-// Lightweight, non-AI fallback seed for the editable summary template when Claude-based
+// Lightweight, non-AI fallback seed for the editable summary template when agent-based
 // generation above fails — real git signal so the scratch buffer never starts fully blank.
 export async function captureRecentActivity(beamId: string, repoRoot: string): Promise<string> {
     let log = '';
@@ -350,32 +309,36 @@ export async function captureRecentActivity(beamId: string, repoRoot: string): P
     return sections.join('\n\n');
 }
 
+// Written under the extension's own directory, not any agent's dotdir — this file is
+// Beams' own resumable-task state, not a memory format any particular agent auto-loads.
 export async function writeSessionSummaryToBeam(
     beamId: string,
     repoRoot: string,
     taskId: string,
     summaryMd: string,
 ): Promise<string> {
-    const remotePath = `${repoRoot}/.claude/session-memory/${taskId}.md`;
+    const remotePath = `${repoRoot}/.beams/session-memory/${taskId}.md`;
     const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/'));
     const encoded = Buffer.from(summaryMd, 'utf-8').toString('base64');
     await execOnBeam(beamId, [`mkdir -p ${shellSingleQuote(remoteDir)} && echo "${encoded}" | base64 -d > ${shellSingleQuote(remotePath)}`]);
     return remotePath;
 }
 
-// Claude Code auto-loads /home/beams/.claude/CLAUDE.md (user memory) into every session on
-// the beam without being asked — unlike the per-repo session-memory file above, which
-// only gets read if something explicitly tells Claude to go look at it. Appending the
-// summary here means a freshly started `claude` session already has the context, no
-// initial "go read this file" prompt required. Idempotent: re-resuming the same task
-// replaces its earlier block instead of appending a duplicate.
-export async function appendSessionSummaryToUserMemory(
+// Each coding-agent CLI auto-loads its own global memory file into every session on the
+// beam without being asked (e.g. Claude Code reads `.claude/CLAUDE.md`, Codex reads
+// `AGENTS.md` — see agents.ts) — unlike the per-repo session-memory file above, which
+// only gets read if something explicitly tells the agent to go look at it. Appending the
+// summary here means a freshly started session already has the context, no initial
+// "go read this file" prompt required. Idempotent: re-resuming the same task replaces
+// its earlier block instead of appending a duplicate.
+export async function appendSessionSummaryToAgentMemory(
     beamId: string,
+    agent: AgentAdapter,
     taskId: string,
     label: string,
     summaryMd: string,
 ): Promise<void> {
-    const remotePath = '/home/beams/.claude/CLAUDE.md';
+    const remotePath = agent.globalMemoryFile;
     const beginMarker = `<!-- BEGIN session-memory:${taskId} -->`;
     const endMarker = `<!-- END session-memory:${taskId} -->`;
     const block = [beginMarker, `## Resumed task: ${label}`, '', summaryMd.trim(), endMarker].join('\n');
@@ -383,14 +346,14 @@ export async function appendSessionSummaryToUserMemory(
     let existing = '';
     try {
         existing = await execOnBeam(beamId, [`cat "${remotePath}" 2>/dev/null || true`]);
-    } catch { /* no existing user memory file */ }
+    } catch { /* no existing global memory file */ }
 
     const blockPattern = new RegExp(`${beginMarker}[\\s\\S]*?${endMarker}`);
     const updated = blockPattern.test(existing)
         ? existing.replace(blockPattern, block)
         : `${existing.trim()}${existing.trim() ? '\n\n' : ''}${block}\n`;
 
+    const remoteDir = remotePath.slice(0, remotePath.lastIndexOf('/'));
     const encoded = Buffer.from(updated, 'utf-8').toString('base64');
-    await execOnBeam(beamId, [`mkdir -p /home/beams/.claude && echo "${encoded}" | base64 -d > "${remotePath}"`]);
+    await execOnBeam(beamId, [`mkdir -p ${shellSingleQuote(remoteDir)} && echo "${encoded}" | base64 -d > "${remotePath}"`]);
 }
-

@@ -12,13 +12,6 @@ export class SessionProfileItem extends vscode.TreeItem {
             this.description = `${profile.gitBranch}@${shortSha}`;
             this.iconPath = new vscode.ThemeIcon('history');
             tooltip.push(`Branch: ${profile.gitBranch}`, `Commit: ${profile.gitCommitSha}`);
-        } else if (profile.setup) {
-            this.description = `${profile.setup.commands.length} setup command(s)`;
-            this.iconPath = new vscode.ThemeIcon('server-environment');
-            tooltip.push(
-                `Setup commands: ${profile.setup.commands.length}`,
-                `Auto-publish: ${profile.setup.autoPublish ? 'yes' : 'no'}`,
-            );
         } else {
             this.iconPath = new vscode.ThemeIcon('history');
         }

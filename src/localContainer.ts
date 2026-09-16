@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { BeamTemplate, TemplateEnvSnapshot } from './templates';
 
 const exec = promisify(execFile);
 
@@ -108,29 +107,18 @@ export function deleteLocalContainerRecord(beamId: string): void {
     }
 }
 
-// The ONLY place `TemplateEnvSnapshot` is read for this feature. Fixed literal
-// return shape (no `...rest` spread) so new snapshot fields fail closed, not
-// open, if the schema grows later. `envVars`, `systemdUnits`, `binScriptsTar`,
-// and `TemplateGithub` (credentials) are never read here or anywhere else in
-// this module — they must never reach the local container.
-export function sanitizeForLocalContainer(
-    snapshot?: TemplateEnvSnapshot,
-): { gitConfig: Array<{ key: string; value: string }> } {
-    const IDENTITY_KEYS = new Set(['user.name', 'user.email']);
-    return { gitConfig: (snapshot?.gitConfig ?? []).filter(e => IDENTITY_KEYS.has(e.key)) };
-}
-
 const DEFAULT_BASE_IMAGE = 'debian:bookworm-slim';
 
-export function generateDockerfile(template: BeamTemplate): string {
+// Deliberately minimal: no beam credentials, environment variables, systemd units, or bin
+// scripts are ever baked into the local debug container image. This guarantee used to be
+// enforced by sanitizing a template's env snapshot; with templates gone it holds because
+// there is no input to leak. Keep it that way if per-beam customization returns.
+export function generateDockerfile(): string {
     const baseImage = vscode.workspace.getConfiguration('beams').get<string>('container.baseImage') || DEFAULT_BASE_IMAGE;
-    const sanitized = sanitizeForLocalContainer(template.envSnapshot);
     const lines = [
         `FROM ${baseImage}`,
         'RUN useradd -m -u 10001 -s /bin/bash beamdebug',
         'WORKDIR /workspace',
-        ...template.commands.map(c => `RUN ${c}`),
-        ...sanitized.gitConfig.map(({ key, value }) => `RUN git config --system ${key} "${value.replace(/"/g, '\\"')}"`),
         'USER beamdebug',
     ];
     return lines.join('\n') + '\n';

@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
-import { execOnBeam } from './tsh';
+import { execOnBeam, classifyTshError } from './tsh';
+import { reportTshError, resetBeamNotice } from './notify';
+
+// Consecutive failed polls tolerated before treating the beam as gone. A single failure is
+// routinely just a slow or dropped round trip, so don't tear polling down on the first one.
+const MAX_POLL_ERRORS = 3;
 
 export interface PollConsumer {
     onGitStatus?(beamId: string, repoRoot: string, porcelain: string, headSha: string): void;
@@ -39,6 +44,7 @@ export class BeamPoller implements vscode.Disposable {
         this.headSha = '';
         this.trackedFiles.clear();
         this.errorCount = 0;
+        resetBeamNotice(beamId);
 
         await this.detectRepo();
         this.start();
@@ -162,8 +168,9 @@ export class BeamPoller implements vscode.Disposable {
                 consumer.onGitStatus?.(this.currentBeamId, this.repoRoot, porcelain, this.headSha);
             }
             this.errorCount = 0;
-        } catch {
+        } catch (err: unknown) {
             this.errorCount++;
+            this.handlePollFailure(err);
         }
         this.gitBusy = false;
     }
@@ -193,8 +200,23 @@ export class BeamPoller implements vscode.Disposable {
                     consumer.onFileStats?.(this.currentBeamId, stats);
                 }
             }
-        } catch { /* ignore */ }
+        } catch (err: unknown) {
+            this.errorCount++;
+            this.handlePollFailure(err);
+        }
         this.statBusy = false;
+    }
+
+    // Polling is the first thing to notice a beam going away. Report it once, as
+    // information rather than an error (an expired beam is expected, not a fault), and stop
+    // polling so a dead beam doesn't keep firing round trips or re-notifying every interval.
+    private handlePollFailure(err: unknown): void {
+        if (this.errorCount < MAX_POLL_ERRORS || classifyTshError(err) !== 'disconnected') {
+            return;
+        }
+        const beamId = this.currentBeamId;
+        this.stop();
+        reportTshError(err, { beamId, action: 'poll beam status' });
     }
 
     dispose(): void {

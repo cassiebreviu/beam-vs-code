@@ -20,7 +20,8 @@ export class BeamGitScmProvider implements PollConsumer, vscode.QuickDiffProvide
         const rootUri = vscode.Uri.parse(`beam://${beamId}${repoRoot}`);
         this.sourceControl = vscode.scm.createSourceControl('beam-git', 'Beam Git', rootUri);
         this.sourceControl.quickDiffProvider = this;
-        this.sourceControl.inputBox.placeholder = 'Commit message';
+        // No commit command exists, so the message box would be a dead end.
+        this.sourceControl.inputBox.visible = false;
 
         this.stagedGroup = this.sourceControl.createResourceGroup('staged', 'Staged Changes');
         this.changesGroup = this.sourceControl.createResourceGroup('changes', 'Changes');
@@ -29,10 +30,6 @@ export class BeamGitScmProvider implements PollConsumer, vscode.QuickDiffProvide
         this.stagedGroup.hideWhenEmpty = true;
         this.changesGroup.hideWhenEmpty = true;
         this.untrackedGroup.hideWhenEmpty = true;
-    }
-
-    get inputBox(): vscode.SourceControlInputBox {
-        return this.sourceControl.inputBox;
     }
 
     provideOriginalResource(uri: vscode.Uri): vscode.Uri | undefined {

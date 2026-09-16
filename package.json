@@ -91,10 +91,13 @@
       { "command": "beams.container.open", "title": "Open Local Debug Container", "icon": "$(debug-console)", "category": "Beams" },
       { "command": "beams.container.syncNow", "title": "Sync Local Debug Container Now", "icon": "$(sync)", "category": "Beams" },
       { "command": "beams.container.rebuild", "title": "Rebuild Local Debug Container Image", "icon": "$(refresh)", "category": "Beams" },
-      { "command": "beams.container.teardown", "title": "Delete Local Debug Container", "icon": "$(trash)", "category": "Beams" }
+      { "command": "beams.container.teardown", "title": "Delete Local Debug Container", "icon": "$(trash)", "category": "Beams" },
+      { "command": "beams.refreshClusters", "title": "Refresh Clusters", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.copyResourceIdentifier", "title": "Copy Identifier", "icon": "$(copy)", "category": "Beams" }
     ],
     "menus": {
       "view/title": [
+        { "command": "beams.refreshClusters", "when": "view == beamClusters", "group": "navigation" },
         { "command": "beams.login", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.refresh", "when": "view == beamsList", "group": "navigation" },
         { "command": "beams.create", "when": "view == beamsList", "group": "navigation" },
@@ -122,7 +125,8 @@
         { "command": "beams.showDiff", "when": "view == beamFiles && viewItem == beamFileChanged", "group": "inline" },
         { "command": "beams.resumeSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
         { "command": "beams.updateSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "inline" },
-        { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" }
+        { "command": "beams.deleteSessionProfile", "when": "view == beamSessionProfiles && viewItem == sessionProfile", "group": "3_danger" },
+        { "command": "beams.copyResourceIdentifier", "when": "view == beamClusters && viewItem =~ /^resource-/", "group": "inline" }
       ],
       "scm/title": [
         { "command": "beams.gitCommit", "when": "scmProvider == beam-git", "group": "navigation" },

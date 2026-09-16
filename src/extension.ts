@@ -4,7 +4,7 @@ import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
 import { AgentActivityProvider } from './activity';
 import { AgentEventsProvider } from './events';
-import { ClustersProvider } from './clusters';
+import { ClustersProvider, ResourceLeafItem } from './clusters';
 import { SessionProfilesProvider } from './sessionProfilesProvider';
 import { registerCommands } from './commands';
 import { BeamPoller } from './polling';
@@ -48,6 +48,19 @@ export function activate(context: vscode.ExtensionContext): void {
         treeDataProvider: clustersProvider,
         showCollapseAll: true,
     });
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('beams.refreshClusters', () => {
+            clustersProvider.refresh();
+        }),
+        vscode.commands.registerCommand('beams.copyResourceIdentifier', async (item: ResourceLeafItem) => {
+            if (!item?.resourceIdentifier) {
+                return;
+            }
+            await vscode.env.clipboard.writeText(item.resourceIdentifier);
+            vscode.window.showInformationMessage('Copied to clipboard.');
+        }),
+    );
 
     vscode.window.createTreeView('beamsList', {
         treeDataProvider: provider,

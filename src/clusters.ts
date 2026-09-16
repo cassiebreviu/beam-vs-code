@@ -1,8 +1,16 @@
 import * as vscode from 'vscode';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const exec = promisify(execFile);
+import {
+    listClusterProfiles,
+    listApps,
+    listDatabases,
+    listKubeClusters,
+    listNodes,
+    RawClusterProfile,
+    AppResource,
+    DbResource,
+    KubeResource,
+    NodeResource,
+} from './tsh';
 
 interface ClusterProfile {
     profileUrl: string;
@@ -46,10 +54,87 @@ class ClusterDetailItem extends vscode.TreeItem {
     }
 }
 
-type TreeItem = ClusterItem | ClusterDetailItem;
+type ResourceKind = 'apps' | 'databases' | 'kube' | 'nodes';
 
-export class ClustersProvider implements vscode.TreeDataProvider<TreeItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<TreeItem | undefined | null>();
+const RESOURCE_ICONS: Record<ResourceKind, string> = {
+    apps: 'globe',
+    databases: 'database',
+    kube: 'circuit-board',
+    nodes: 'server',
+};
+
+const RESOURCE_LABELS: Record<ResourceKind, string> = {
+    apps: 'Apps',
+    databases: 'Databases',
+    kube: 'Kubernetes Clusters',
+    nodes: 'Nodes',
+};
+
+class ResourceCategoryItem extends vscode.TreeItem {
+    constructor(public readonly kind: ResourceKind, public readonly clusterProfile: ClusterProfile) {
+        super(RESOURCE_LABELS[kind], vscode.TreeItemCollapsibleState.Collapsed);
+        this.iconPath = new vscode.ThemeIcon(RESOURCE_ICONS[kind]);
+        this.contextValue = `resourceCategory-${kind}`;
+    }
+}
+
+class SettingsCategoryItem extends vscode.TreeItem {
+    constructor(public readonly clusterProfile: ClusterProfile) {
+        super('Settings', vscode.TreeItemCollapsibleState.Collapsed);
+        this.iconPath = new vscode.ThemeIcon('gear');
+        this.contextValue = 'clusterSettings';
+    }
+}
+
+type AnyResource = AppResource | DbResource | KubeResource | NodeResource;
+
+function hasBeamAliasLabel(labels: Record<string, string>): string | undefined {
+    return labels['teleport.internal/beams/alias'];
+}
+
+export class ResourceLeafItem extends vscode.TreeItem {
+    constructor(kind: ResourceKind, resource: AnyResource, rootCluster: string) {
+        const beamAlias = hasBeamAliasLabel(resource.labels);
+        const label = kind === 'nodes' && beamAlias ? `${resource.name} (${beamAlias})` : resource.name;
+        super(label, vscode.TreeItemCollapsibleState.None);
+
+        const isLeaf = resource.cluster !== rootCluster;
+        const detail = ResourceLeafItem.detailFor(kind, resource);
+        this.description = isLeaf ? `${detail} (leaf: ${resource.cluster})` : detail;
+
+        this.tooltip = [
+            `Name: ${resource.name}`,
+            `Cluster: ${resource.cluster}`,
+            `Proxy: ${resource.proxy}`,
+            ...(('description' in resource && resource.description) ? [`Description: ${resource.description}`] : []),
+            `Labels: ${Object.entries(resource.labels).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'}`,
+        ].join('\n');
+
+        this.iconPath = new vscode.ThemeIcon(kind === 'nodes' && beamAlias ? 'vm' : RESOURCE_ICONS[kind]);
+        this.contextValue = `resource-${kind}`;
+        this.resourceIdentifier = ('publicAddr' in resource && resource.publicAddr) ? resource.publicAddr : resource.name;
+    }
+
+    resourceIdentifier: string;
+
+    private static detailFor(kind: ResourceKind, resource: AnyResource): string {
+        switch (kind) {
+            case 'apps':
+                return (resource as AppResource).publicAddr || (resource as AppResource).uri || '';
+            case 'databases':
+                return (resource as DbResource).protocol || '';
+            case 'kube':
+                return '';
+            case 'nodes':
+                return (resource as NodeResource).addr || (resource as NodeResource).hostname || '';
+        }
+    }
+}
+
+type Element = ClusterItem | ClusterDetailItem | ResourceCategoryItem | ResourceLeafItem | SettingsCategoryItem;
+
+export class ClustersProvider implements vscode.TreeDataProvider<Element> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<Element | undefined | null>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private profiles: ClusterProfile[] = [];
@@ -77,8 +162,7 @@ export class ClustersProvider implements vscode.TreeDataProvider<TreeItem> {
 
     private async poll(): Promise<void> {
         try {
-            const { stdout } = await exec('tsh', ['status', '--format=json'], { timeout: 10000 });
-            const data = JSON.parse(stdout);
+            const data = await listClusterProfiles();
             const profiles: ClusterProfile[] = [];
 
             if (data.active) {
@@ -99,23 +183,23 @@ export class ClustersProvider implements vscode.TreeDataProvider<TreeItem> {
         }
     }
 
-    private parseProfile(raw: Record<string, unknown>, active: boolean): ClusterProfile {
+    private parseProfile(raw: RawClusterProfile, active: boolean): ClusterProfile {
         return {
-            profileUrl: (raw.profile_url as string) ?? '',
-            username: (raw.username as string) ?? '',
-            cluster: (raw.cluster as string) ?? '',
-            roles: (raw.roles as string[]) ?? [],
-            logins: (raw.logins as string[]) ?? [],
-            validUntil: (raw.valid_until as string) ?? '',
+            profileUrl: raw.profile_url ?? '',
+            username: raw.username ?? '',
+            cluster: raw.cluster ?? '',
+            roles: raw.roles ?? [],
+            logins: raw.logins ?? [],
+            validUntil: raw.valid_until ?? '',
             active,
         };
     }
 
-    getTreeItem(element: TreeItem): vscode.TreeItem {
+    getTreeItem(element: Element): vscode.TreeItem {
         return element;
     }
 
-    getChildren(element?: TreeItem): TreeItem[] {
+    async getChildren(element?: Element): Promise<Element[]> {
         if (!element) {
             if (this.profiles.length === 0) {
                 return [new ClusterDetailItem('Not logged in', 'run tsh login', 'warning')];
@@ -126,6 +210,17 @@ export class ClustersProvider implements vscode.TreeDataProvider<TreeItem> {
         if (element instanceof ClusterItem) {
             const p = element.profile;
             return [
+                new SettingsCategoryItem(p),
+                new ResourceCategoryItem('apps', p),
+                new ResourceCategoryItem('databases', p),
+                new ResourceCategoryItem('kube', p),
+                new ResourceCategoryItem('nodes', p),
+            ];
+        }
+
+        if (element instanceof SettingsCategoryItem) {
+            const p = element.clusterProfile;
+            return [
                 new ClusterDetailItem('User', p.username, 'account'),
                 new ClusterDetailItem('Roles', p.roles.join(', '), 'shield'),
                 new ClusterDetailItem('Logins', p.logins.join(', '), 'terminal'),
@@ -134,6 +229,42 @@ export class ClustersProvider implements vscode.TreeDataProvider<TreeItem> {
             ];
         }
 
+        if (element instanceof ResourceCategoryItem) {
+            return this.loadResources(element);
+        }
+
         return [];
+    }
+
+    private async loadResources(category: ResourceCategoryItem): Promise<Element[]> {
+        const profile = category.clusterProfile;
+        const proxy = profile.active ? undefined : profile.cluster;
+
+        try {
+            let resources: AnyResource[];
+            switch (category.kind) {
+                case 'apps':
+                    resources = await listApps(proxy);
+                    break;
+                case 'databases':
+                    resources = await listDatabases(proxy);
+                    break;
+                case 'kube':
+                    resources = await listKubeClusters(proxy);
+                    break;
+                case 'nodes':
+                    resources = await listNodes(proxy);
+                    break;
+            }
+
+            if (resources.length === 0) {
+                return [new ClusterDetailItem('None', `no ${RESOURCE_LABELS[category.kind].toLowerCase()} accessible`)];
+            }
+
+            return resources.map(r => new ResourceLeafItem(category.kind, r, profile.cluster));
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return [new ClusterDetailItem('Error', msg, 'warning')];
+        }
     }
 }

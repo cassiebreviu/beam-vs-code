@@ -18,6 +18,42 @@ export interface TshStatus {
     validUntil: string;
 }
 
+export interface AppResource {
+    name: string;
+    cluster: string;
+    proxy: string;
+    subKind: string;
+    publicAddr: string;
+    uri: string;
+    description: string;
+    labels: Record<string, string>;
+}
+
+export interface DbResource {
+    name: string;
+    cluster: string;
+    proxy: string;
+    protocol: string;
+    description: string;
+    labels: Record<string, string>;
+}
+
+export interface KubeResource {
+    name: string;
+    cluster: string;
+    proxy: string;
+    labels: Record<string, string>;
+}
+
+export interface NodeResource {
+    name: string;
+    hostname: string;
+    cluster: string;
+    proxy: string;
+    addr: string;
+    labels: Record<string, string>;
+}
+
 async function runTsh(args: string[], options?: { timeout?: number }): Promise<string> {
     const { stdout } = await exec('tsh', args, {
         timeout: options?.timeout ?? 30000,
@@ -97,6 +133,128 @@ export async function checkStatus(): Promise<TshStatus> {
     } catch {
         return { loggedIn: false, user: '', cluster: '', validUntil: '' };
     }
+}
+
+export interface RawClusterProfile {
+    profile_url?: string;
+    username?: string;
+    cluster?: string;
+    roles?: string[];
+    logins?: string[];
+    valid_until?: string;
+}
+
+export async function listClusterProfiles(): Promise<{ active?: RawClusterProfile; profiles?: RawClusterProfile[] }> {
+    const output = await runTsh(['status', '--format=json'], { timeout: 10000 });
+    return JSON.parse(output);
+}
+
+// `tsh <kind> ls -f json` returns a bare array of resource objects; `--all` wraps each in
+// {proxy, cluster, <kind>: {...}} so items from federated/leaf clusters carry their origin.
+// The wrapper key names for db/kube couldn't be confirmed against a live cluster with such
+// resources in this environment, so we fall back to a few plausible keys, then to the raw
+// object itself, rather than assuming a single name and risking a silent empty result.
+function unwrapResource(raw: Record<string, unknown>, wrapperKeys: string[]): { inner: Record<string, unknown>; cluster: string; proxy: string } {
+    let inner = raw;
+    for (const key of wrapperKeys) {
+        if (raw[key] && typeof raw[key] === 'object') {
+            inner = raw[key] as Record<string, unknown>;
+            break;
+        }
+    }
+    return {
+        inner,
+        cluster: (raw.cluster as string) ?? '',
+        proxy: (raw.proxy as string) ?? '',
+    };
+}
+
+function labelsOf(inner: Record<string, unknown>): Record<string, string> {
+    const metadata = (inner.metadata as Record<string, unknown>) ?? {};
+    return (metadata.labels as Record<string, string>) ?? {};
+}
+
+function nameOf(inner: Record<string, unknown>): string {
+    const metadata = (inner.metadata as Record<string, unknown>) ?? {};
+    return (metadata.name as string) ?? '';
+}
+
+function descriptionOf(inner: Record<string, unknown>): string {
+    const metadata = (inner.metadata as Record<string, unknown>) ?? {};
+    return (metadata.description as string) ?? '';
+}
+
+async function listResources(subcommand: string[], wrapperKeys: string[], proxy?: string): Promise<Record<string, unknown>[]> {
+    const args = [...subcommand, '-f', 'json', '--all'];
+    if (proxy) {
+        args.push(`--proxy=${proxy}`);
+    }
+    const output = await runTsh(args, { timeout: 15000 });
+    const parsed = JSON.parse(output);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed.map((raw: Record<string, unknown>) => {
+        const { inner, cluster, proxy: itemProxy } = unwrapResource(raw, wrapperKeys);
+        return { ...inner, cluster, proxy: itemProxy };
+    });
+}
+
+export async function listApps(proxy?: string): Promise<AppResource[]> {
+    const items = await listResources(['apps', 'ls'], ['app'], proxy);
+    return items.map(item => {
+        const spec = (item.spec as Record<string, unknown>) ?? {};
+        return {
+            name: nameOf(item),
+            cluster: item.cluster as string,
+            proxy: item.proxy as string,
+            subKind: (item.sub_kind as string) ?? '',
+            publicAddr: (spec.public_addr as string) ?? '',
+            uri: (spec.uri as string) ?? '',
+            description: descriptionOf(item),
+            labels: labelsOf(item),
+        };
+    });
+}
+
+export async function listDatabases(proxy?: string): Promise<DbResource[]> {
+    const items = await listResources(['db', 'ls'], ['database', 'db'], proxy);
+    return items.map(item => {
+        const spec = (item.spec as Record<string, unknown>) ?? {};
+        return {
+            name: nameOf(item),
+            cluster: item.cluster as string,
+            proxy: item.proxy as string,
+            protocol: (spec.protocol as string) ?? '',
+            description: descriptionOf(item),
+            labels: labelsOf(item),
+        };
+    });
+}
+
+export async function listKubeClusters(proxy?: string): Promise<KubeResource[]> {
+    const items = await listResources(['kube', 'ls'], ['kubernetes_cluster', 'kube_cluster'], proxy);
+    return items.map(item => ({
+        name: nameOf(item),
+        cluster: item.cluster as string,
+        proxy: item.proxy as string,
+        labels: labelsOf(item),
+    }));
+}
+
+export async function listNodes(proxy?: string): Promise<NodeResource[]> {
+    const items = await listResources(['ls'], ['node'], proxy);
+    return items.map(item => {
+        const spec = (item.spec as Record<string, unknown>) ?? {};
+        return {
+            name: nameOf(item),
+            hostname: (spec.hostname as string) ?? '',
+            cluster: item.cluster as string,
+            proxy: item.proxy as string,
+            addr: (spec.addr as string) ?? '',
+            labels: labelsOf(item),
+        };
+    });
 }
 
 export async function scpFromBeam(id: string, remotePath: string, localPath: string): Promise<void> {

@@ -4,6 +4,7 @@ import { BeamFileExplorer } from './fileExplorer';
 import { BeamFileSystemProvider } from './beamFs';
 import { AgentEventsProvider } from './events';
 import { ClustersProvider } from './clusters';
+import { SessionProfilesProvider } from './sessionProfilesProvider';
 import { registerCommands } from './commands';
 import { BeamPoller } from './polling';
 import { BeamGitOriginalProvider } from './gitOriginal';
@@ -19,6 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const fileExplorer = new BeamFileExplorer();
     const eventsProvider = new AgentEventsProvider();
     const clustersProvider = new ClustersProvider();
+    const sessionProfilesProvider = new SessionProfilesProvider();
 
     const poller = new BeamPoller();
     const fsProvider = new BeamFileSystemProvider();
@@ -62,6 +64,11 @@ export function activate(context: vscode.ExtensionContext): void {
         showCollapseAll: false,
     });
 
+    vscode.window.createTreeView('beamSessionProfiles', {
+        treeDataProvider: sessionProfilesProvider,
+        showCollapseAll: false,
+    });
+
     context.subscriptions.push(
         vscode.workspace.registerFileSystemProvider('beam', fsProvider, {
             isCaseSensitive: true,
@@ -87,7 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    registerCommands(context, provider, fileExplorer, eventsProvider, poller, () => scmProvider, containerSyncEngine);
+    registerCommands(context, provider, fileExplorer, eventsProvider, sessionProfilesProvider, poller, () => scmProvider, containerSyncEngine);
     registerScmCommands(context, () => poller);
 
     // Hook beam selection to start SCM integration

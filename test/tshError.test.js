@@ -66,3 +66,10 @@ test('leaves genuine command failures as other', () => {
         assert.equal(classifyTshError(err(message)), 'other', message);
     }
 });
+
+test('explains a silent tsh failure instead of returning an empty message', () => {
+    const timedOut = Object.assign(new Error('Command failed: tsh beams add -f json\n'), { killed: true, signal: 'SIGTERM' });
+    assert.equal(tshErrorMessage(timedOut), 'tsh timed out (SIGTERM)');
+    const exited = Object.assign(new Error('Command failed: tsh beams add -f json\n'), { code: 1 });
+    assert.equal(tshErrorMessage(exited), 'tsh exited with code 1 without an error message');
+});

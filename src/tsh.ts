@@ -91,10 +91,22 @@ const AUTH_PATTERNS = [
 
 export function tshErrorMessage(err: unknown): string {
     const raw = err instanceof Error ? err.message : String(err);
-    return stripAnsi(raw)
+    const message = stripAnsi(raw)
         .replace(/^Command failed:[^\n]*\n?/, '')
         .replace(/^ERROR:\s*/gm, '')
         .trim();
+    if (message) {
+        return message;
+    }
+    // tsh wrote nothing to stderr — say how it failed rather than showing an empty reason.
+    const { code, killed, signal } = (err ?? {}) as { code?: unknown; killed?: unknown; signal?: unknown };
+    if (code === 'ETIMEDOUT' || killed === true) {
+        return `tsh timed out${signal ? ` (${signal})` : ''}`;
+    }
+    if (typeof code === 'number') {
+        return `tsh exited with code ${code} without an error message`;
+    }
+    return stripAnsi(raw).trim();
 }
 
 // Disconnect patterns are checked before auth ones on purpose: when a beam is gone,
@@ -135,7 +147,8 @@ export async function listBeams(): Promise<Beam[]> {
 }
 
 export async function addBeam(): Promise<Beam> {
-    const output = await runTsh(['beams', 'add', '-f', 'json']);
+    // Provisioning can fall back to another region, so allow more than the default 30s.
+    const output = await runTsh(['beams', 'add', '-f', 'json'], { timeout: 120000 });
     return JSON.parse(output);
 }
 

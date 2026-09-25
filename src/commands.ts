@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BeamItem, setBeamLabel } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, waitForBeamReady, detectRepoRoot } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, waitForBeamReady, detectRepoRoot, tshErrorMessage } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { reportTshError } from './notify';
 import { setupGithubOnBeam, autoSetupGithub, SECRET_KEY } from './github';
@@ -213,7 +213,7 @@ export function registerCommands(
                     );
                 }
             } catch (err: unknown) {
-                vscode.window.showErrorMessage(`Failed to create beam: ${err instanceof Error ? err.message : err}`);
+                vscode.window.showErrorMessage(`Failed to create beam: ${tshErrorMessage(err)}`);
             }
         }),
 

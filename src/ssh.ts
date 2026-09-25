@@ -136,11 +136,52 @@ async function buildWildcardBlock(cluster: string): Promise<string> {
     ].join('\n');
 }
 
+function hostPatterns(line: string): string[] | null {
+    const match = line.match(/^\s*Host\s+(.+)$/i);
+    return match ? match[1].trim().split(/\s+/) : null;
+}
+
 function hasHost(config: string, host: string): boolean {
-    return config.split('\n').some(line => {
-        const match = line.match(/^\s*Host\s+(.+)$/i);
-        return match?.[1].trim().split(/\s+/).includes(host) ?? false;
-    });
+    return config.split('\n').some(line => hostPatterns(line)?.includes(host) ?? false);
+}
+
+/**
+ * Moves a Beam's Host entry above the first `*.<cluster>` wildcard if it sits
+ * below one. OpenSSH takes the first value it sees for each setting, so an
+ * entry below tsh's wildcard inherits `UserKnownHostsFile ~/.tsh/known_hosts`
+ * instead of `/dev/null`. Beam names get reused across recreated VMs, so a
+ * stale key there triggers ssh's MITM guard, which disables port forwarding
+ * and breaks Remote-SSH's `-D` tunnel with ECONNREFUSED.
+ */
+function hoistBeamEntry(config: string, host: string, cluster: string): string {
+    const lines = config.split('\n');
+    const wildcardIdx = lines.findIndex(line => hostPatterns(line)?.includes(`*.${cluster}`) ?? false);
+    const hostIdx = lines.findIndex(line => hostPatterns(line)?.includes(host) ?? false);
+    if (wildcardIdx === -1 || hostIdx === -1 || hostIdx < wildcardIdx) {
+        return config;
+    }
+
+    let end = hostIdx + 1;
+    while (end < lines.length && /^\s+\S/.test(lines[end])) {
+        end++;
+    }
+    const entry = lines.splice(hostIdx, end - hostIdx);
+    // Drop the blank separator the entry leaves behind.
+    if (lines[hostIdx - 1]?.trim() === '' && (lines[hostIdx] === undefined || lines[hostIdx].trim() === '' || lines[hostIdx].startsWith('#'))) {
+        lines.splice(hostIdx - 1, 1);
+    }
+
+    // Insert above the wildcard and any comments introducing it (e.g. tsh's
+    // "# Begin generated Teleport configuration" header), but inside our marker.
+    let insertIdx = wildcardIdx;
+    while (insertIdx > 0 && /^(#|\s*$)/.test(lines[insertIdx - 1]) && lines[insertIdx - 1] !== MARKER_START) {
+        insertIdx--;
+    }
+    while (lines[insertIdx].trim() === '') {
+        insertIdx++;
+    }
+    lines.splice(insertIdx, 0, ...entry, '');
+    return lines.join('\n');
 }
 
 /**
@@ -234,7 +275,9 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
     const migrated = migratedConfig !== config;
     config = migratedConfig;
     if (hasHost(config, host)) {
-        if (migrated) {
+        const hoistedConfig = hoistBeamEntry(config, host, cluster);
+        if (migrated || hoistedConfig !== config) {
+            config = hoistedConfig;
             writeSshConfig(config);
         }
         return host;
@@ -308,7 +351,7 @@ export async function ensureBeamSshConfig(beamId: string, rawCluster: string): P
             if (!hasHost(config, `*.${cluster}`)) {
                 entries.push('', await buildWildcardBlock(cluster));
             }
-            config = before + entries.join('\n') + '\n' + after;
+            config = hoistBeamEntry(before + entries.join('\n') + '\n' + after, host, cluster);
             writeSshConfig(config);
             return host;
         }

@@ -330,9 +330,45 @@ export function registerCommands(
         vscode.commands.registerCommand('beams.publish', async (item: BeamItem) => {
             if (!item) {
                 return;
+            // Offer the settings saved by "Remember these settings" instead of re-prompting.
+            const savedCfg = vscode.workspace.getConfiguration('beams');
+            const savedUsername = savedCfg.get<string>('github.username');
+            const savedAuthMethod = savedCfg.get<string>('github.authMethod');
+            if (savedUsername && savedAuthMethod) {
+                const savedEmail = savedCfg.get<string>('github.email') || `${savedUsername}@users.noreply.github.com`;
+                const choice = await vscode.window.showQuickPick(
+                    [
+                        { label: '$(mark-github) Use saved GitHub settings', description: `${savedUsername} · ${savedEmail} · ${savedAuthMethod}`, useSaved: true },
+                        { label: '$(edit) Enter different settings', useSaved: false },
+                    ],
+                    { placeHolder: 'Set up GitHub on this beam', ignoreFocusOut: true }
+                );
+                if (choice === undefined) {
+                    return;
+                }
+                if (choice.useSaved) {
+                    const targetBeam = beamId;
+                    const result = await vscode.window.withProgress(
+                        { location: vscode.ProgressLocation.Notification, title: 'Setting up GitHub on beam...', cancellable: false },
+                        progress => autoSetupGithub(targetBeam, context, progress, true)
+                    );
+                    if (result.error) {
+                        vscode.window.showErrorMessage(`GitHub setup failed: ${result.error}`);
+                    } else if (savedAuthMethod === 'oauth') {
+                        vscode.window.showInformationMessage(
+                            'GitHub CLI installed. Open a terminal on the beam and run: gh auth login'
+                        );
+                    } else {
+                        vscode.window.showInformationMessage('GitHub setup complete on beam.');
+                    }
+                    return;
+                }
+            }
+
             }
             try {
                 const url = await vscode.window.withProgress(
+                value: savedUsername || undefined,
                     { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
                     () => publishBeam(item.beam.id)
                 );
@@ -404,7 +440,7 @@ export function registerCommands(
             const email = await vscode.window.showInputBox({
                 prompt: 'Git email',
                 placeHolder: `${username}@users.noreply.github.com`,
-                value: `${username}@users.noreply.github.com`,
+                value: (username === savedUsername && savedCfg.get<string>('github.email')) || `${username}@users.noreply.github.com`,
                 ignoreFocusOut: true,
             });
             if (email === undefined) {

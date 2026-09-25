@@ -77,6 +77,7 @@
       { "command": "beams.viewSessionProfile", "title": "View Session Profile", "category": "Beams" },
       { "command": "beams.deleteSessionProfile", "title": "Delete Session Profile", "icon": "$(trash)", "category": "Beams" },
       { "command": "beams.refreshSessionProfiles", "title": "Refresh Session Profiles", "icon": "$(refresh)", "category": "Beams" },
+      { "command": "beams.container.create", "title": "Replicate to Local Debug Container", "icon": "$(vm)", "category": "Beams" },
       { "command": "beams.container.open", "title": "Open Local Debug Container", "icon": "$(debug-console)", "category": "Beams" },
       { "command": "beams.container.syncNow", "title": "Sync Local Debug Container Now", "icon": "$(sync)", "category": "Beams" },
       { "command": "beams.container.rebuild", "title": "Rebuild Local Debug Container Image", "icon": "$(refresh)", "category": "Beams" },
@@ -109,6 +110,7 @@
         { "command": "beams.export", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.setupGithub", "when": "view == beamsList", "group": "2_actions" },
         { "command": "beams.saveSessionProfile", "when": "view == beamsList", "group": "2_actions" },
+        { "command": "beams.container.create", "when": "view == beamsList && viewItem =~ /^beam(Published)?$/", "group": "2_actions" },
         { "command": "beams.container.open", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.container.syncNow", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
         { "command": "beams.container.rebuild", "when": "view == beamsList && viewItem =~ /hasLocalContainer/", "group": "2_actions" },
@@ -177,7 +179,7 @@
         "beams.container.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Global kill-switch for local debug container sync. Does not enable the feature for a beam that didn't opt in at creation — only disables it globally."
+          "description": "Global kill-switch for local debug container sync. Does not enable the feature for a beam that hasn't been replicated locally — only disables it globally."
         },
         "beams.container.syncMinInterval": {
           "type": "number",

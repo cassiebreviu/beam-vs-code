@@ -125,40 +125,6 @@ export function registerCommands(
                 }
             }
 
-            // Local debug container: decided once, here, at creation time only.
-            // There is deliberately no command anywhere in this extension that
-            // edits this choice for an existing beam — delete this beam and
-            // create a new one to change it.
-            let enableLocalContainer = false;
-            let localContainerSyncMode: LocalContainerSyncMode = 'manual';
-            if (await isDockerAvailable()) {
-                const choice = await vscode.window.showQuickPick(
-                    [
-                        { label: '$(circle-slash) No', description: 'Recommended', enable: false },
-                        { label: '$(vm) Yes', description: 'Mirrors this beam into a locked-down local Docker container for debugging. Cannot be changed later — delete this beam and create a new one to change this choice.', enable: true },
-                    ],
-                    { placeHolder: 'Enable local debug container for this beam? (fixed for this beam’s lifetime)' }
-                );
-                if (choice === undefined) {
-                    return;
-                }
-                enableLocalContainer = choice.enable;
-
-                if (enableLocalContainer) {
-                    const syncChoice = await vscode.window.showQuickPick(
-                        [
-                            { label: '$(sync) Automatic', description: 'Syncs shortly after git status changes on the beam (also fixed for this beam’s lifetime)', mode: 'automatic' as LocalContainerSyncMode },
-                            { label: '$(circle-outline) Manual', description: 'Only syncs when you run "Sync Local Debug Container Now"', mode: 'manual' as LocalContainerSyncMode },
-                        ],
-                        { placeHolder: 'How should the local debug container sync from the beam?' }
-                    );
-                    if (syncChoice === undefined) {
-                        return;
-                    }
-                    localContainerSyncMode = syncChoice.mode;
-                }
-            }
-
             try {
                 const beam = await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Notification, title: 'Creating beam...' },
@@ -179,39 +145,11 @@ export function registerCommands(
                             }
                         } catch { /* non-fatal */ }
 
-                        if (enableLocalContainer) {
-                            progress.report({ message: 'Setting up local debug container...' });
-                            try {
-                                const repoRoot = (await detectRepoRoot(b.id)) ?? '/home/beams';
-                                const record = createLocalContainerRecord(b.id, repoRoot, localContainerSyncMode);
-                                writeDockerfile(b.id, generateDockerfile());
-                                writeDevcontainerJson(record);
-                            } catch (err: unknown) {
-                                vscode.window.showWarningMessage(`Local debug container setup failed: ${err instanceof Error ? err.message : err}`);
-                            }
-                        }
-
                         return { beam: b };
                     }
                 );
                 vscode.window.showInformationMessage(`Beam "${beam.beam.id}" created.`);
                 provider.refresh();
-
-                // Build the local container image in the background — not
-                // awaited, so it never adds latency to beam creation itself.
-                const record = getLocalContainerRecord(beam.beam.id);
-                if (record) {
-                    void vscode.window.withProgress(
-                        { location: vscode.ProgressLocation.Notification, title: `Building local debug container image for "${beam.beam.id}"...` },
-                        async () => {
-                            try {
-                                await buildContainerImage(record);
-                            } catch (err: unknown) {
-                                vscode.window.showWarningMessage(`Local debug container image build failed: ${err instanceof Error ? err.message : err}`);
-                            }
-                        }
-                    );
-                }
             } catch (err: unknown) {
                 vscode.window.showErrorMessage(`Failed to create beam: ${tshErrorMessage(err)}`);
             }
@@ -330,45 +268,9 @@ export function registerCommands(
         vscode.commands.registerCommand('beams.publish', async (item: BeamItem) => {
             if (!item) {
                 return;
-            // Offer the settings saved by "Remember these settings" instead of re-prompting.
-            const savedCfg = vscode.workspace.getConfiguration('beams');
-            const savedUsername = savedCfg.get<string>('github.username');
-            const savedAuthMethod = savedCfg.get<string>('github.authMethod');
-            if (savedUsername && savedAuthMethod) {
-                const savedEmail = savedCfg.get<string>('github.email') || `${savedUsername}@users.noreply.github.com`;
-                const choice = await vscode.window.showQuickPick(
-                    [
-                        { label: '$(mark-github) Use saved GitHub settings', description: `${savedUsername} · ${savedEmail} · ${savedAuthMethod}`, useSaved: true },
-                        { label: '$(edit) Enter different settings', useSaved: false },
-                    ],
-                    { placeHolder: 'Set up GitHub on this beam', ignoreFocusOut: true }
-                );
-                if (choice === undefined) {
-                    return;
-                }
-                if (choice.useSaved) {
-                    const targetBeam = beamId;
-                    const result = await vscode.window.withProgress(
-                        { location: vscode.ProgressLocation.Notification, title: 'Setting up GitHub on beam...', cancellable: false },
-                        progress => autoSetupGithub(targetBeam, context, progress, true)
-                    );
-                    if (result.error) {
-                        vscode.window.showErrorMessage(`GitHub setup failed: ${result.error}`);
-                    } else if (savedAuthMethod === 'oauth') {
-                        vscode.window.showInformationMessage(
-                            'GitHub CLI installed. Open a terminal on the beam and run: gh auth login'
-                        );
-                    } else {
-                        vscode.window.showInformationMessage('GitHub setup complete on beam.');
-                    }
-                    return;
-                }
-            }
-
             }
             try {
                 const url = await vscode.window.withProgress(
-                value: savedUsername || undefined,
                     { location: vscode.ProgressLocation.Notification, title: 'Publishing beam...' },
                     () => publishBeam(item.beam.id)
                 );
@@ -428,9 +330,45 @@ export function registerCommands(
                 beamId = picked.label;
             }
 
+            // Offer the settings saved by "Remember these settings" instead of re-prompting.
+            const savedCfg = vscode.workspace.getConfiguration('beams');
+            const savedUsername = savedCfg.get<string>('github.username');
+            const savedAuthMethod = savedCfg.get<string>('github.authMethod');
+            if (savedUsername && savedAuthMethod) {
+                const savedEmail = savedCfg.get<string>('github.email') || `${savedUsername}@users.noreply.github.com`;
+                const choice = await vscode.window.showQuickPick(
+                    [
+                        { label: '$(mark-github) Use saved GitHub settings', description: `${savedUsername} · ${savedEmail} · ${savedAuthMethod}`, useSaved: true },
+                        { label: '$(edit) Enter different settings', useSaved: false },
+                    ],
+                    { placeHolder: 'Set up GitHub on this beam', ignoreFocusOut: true }
+                );
+                if (choice === undefined) {
+                    return;
+                }
+                if (choice.useSaved) {
+                    const targetBeam = beamId;
+                    const result = await vscode.window.withProgress(
+                        { location: vscode.ProgressLocation.Notification, title: 'Setting up GitHub on beam...', cancellable: false },
+                        progress => autoSetupGithub(targetBeam, context, progress, true)
+                    );
+                    if (result.error) {
+                        vscode.window.showErrorMessage(`GitHub setup failed: ${result.error}`);
+                    } else if (savedAuthMethod === 'oauth') {
+                        vscode.window.showInformationMessage(
+                            'GitHub CLI installed. Open a terminal on the beam and run: gh auth login'
+                        );
+                    } else {
+                        vscode.window.showInformationMessage('GitHub setup complete on beam.');
+                    }
+                    return;
+                }
+            }
+
             const username = await vscode.window.showInputBox({
                 prompt: 'GitHub username',
                 placeHolder: 'octocat',
+                value: savedUsername || undefined,
                 ignoreFocusOut: true,
             });
             if (!username) {
@@ -628,8 +566,52 @@ export function registerCommands(
             }
         }),
 
-        // Local debug container commands. Note there is deliberately no
-        // enable/toggle/configure command here — see beams.create.
+        // Local debug container commands. beams.container.create is the only way to opt a
+        // beam in; there is deliberately no command that edits an existing container's
+        // settings — delete it (beams.container.teardown) and replicate again instead.
+        vscode.commands.registerCommand('beams.container.create', async (item: BeamItem) => {
+            if (!item?.beam) {
+                return;
+            }
+            const beamId = item.beam.id;
+            if (getLocalContainerRecord(beamId)) {
+                vscode.window.showInformationMessage(`Beam "${beamId}" already has a local debug container.`);
+                return;
+            }
+            if (!(await isDockerAvailable())) {
+                vscode.window.showErrorMessage('Docker is not available. Install or start Docker to replicate this beam locally.');
+                return;
+            }
+            const syncChoice = await vscode.window.showQuickPick(
+                [
+                    { label: '$(sync) Automatic', description: 'Syncs shortly after git status changes on the beam', mode: 'automatic' as LocalContainerSyncMode },
+                    { label: '$(circle-outline) Manual', description: 'Only syncs when you run "Sync Local Debug Container Now"', mode: 'manual' as LocalContainerSyncMode },
+                ],
+                { placeHolder: `How should the local debug container for "${beamId}" sync from the beam?` }
+            );
+            if (syncChoice === undefined) {
+                return;
+            }
+            try {
+                await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Notification, title: `Replicating "${beamId}" to a local debug container...` },
+                    async (progress) => {
+                        progress.report({ message: 'Locating repository on beam...' });
+                        const repoRoot = (await detectRepoRoot(beamId)) ?? '/home/beams';
+                        const record = createLocalContainerRecord(beamId, repoRoot, syncChoice.mode);
+                        writeDockerfile(beamId, generateDockerfile());
+                        writeDevcontainerJson(record);
+                        provider.refresh();
+                        progress.report({ message: 'Building container image...' });
+                        await buildContainerImage(record);
+                    }
+                );
+                vscode.window.showInformationMessage(`Local debug container for "${beamId}" is ready. Use "Open Local Debug Container" to start it.`);
+            } catch (err: unknown) {
+                reportTshError(err, { beamId, action: 'replicate beam to a local debug container', refresh: () => provider.refresh() });
+            }
+        }),
+
         vscode.commands.registerCommand('beams.container.open', async (item: BeamItem) => {
             if (!item?.beam) {
                 return;

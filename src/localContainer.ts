@@ -9,10 +9,10 @@ const exec = promisify(execFile);
 
 export type LocalContainerSyncMode = 'manual' | 'automatic';
 
-// Written exactly once, at beam-creation time. No function in this module
-// (or anywhere else in the extension) ever edits `enabled`/`syncMode` on an
-// existing record — the only way to change the decision is
-// `deleteLocalContainerRecord` (full teardown) followed by creating a new beam.
+// Written exactly once, by the "Replicate to Local Debug Container" action. No
+// function in this module (or anywhere else in the extension) ever edits
+// `enabled`/`syncMode` on an existing record — the only way to change the
+// decision is `deleteLocalContainerRecord` (full teardown) and replicating again.
 export interface LocalContainerRecord {
     beamId: string;
     enabled: boolean;
@@ -60,8 +60,8 @@ function writeRecord(record: LocalContainerRecord): void {
     fs.writeFileSync(getRecordPath(record.beamId), JSON.stringify(record, null, 2), 'utf-8');
 }
 
-// Called once, from the beam-creation flow only. `enabled` is always `true`
-// here — a record simply does not exist for beams that didn't opt in.
+// Called once per opt-in, from beams.container.create only. `enabled` is always
+// `true` here — a record simply does not exist for beams that didn't opt in.
 export function createLocalContainerRecord(
     beamId: string,
     repoRoot: string,

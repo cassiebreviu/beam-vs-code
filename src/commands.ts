@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { BeamItem, setBeamLabel } from './beamItem';
 import { BeamsProvider } from './beamsProvider';
 import { BeamFileExplorer } from './fileExplorer';
-import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, waitForBeamReady, detectRepoRoot, tshErrorMessage } from './tsh';
+import { addBeam, removeBeam, publishBeam, unpublishBeam, execOnBeam, scpFromBeam, checkStatus, listBeams, waitForBeamReady, detectRepoRoot, tshErrorMessage, tshBinary } from './tsh';
 import { openBeamTerminal } from './terminal';
 import { reportTshError } from './notify';
 import { setupGithubOnBeam, autoSetupGithub, SECRET_KEY } from './github';
@@ -95,7 +95,7 @@ export function registerCommands(
             }
             const terminal = vscode.window.createTerminal({
                 name: 'tsh login',
-                shellPath: process.platform === 'win32' ? 'tsh.exe' : 'tsh',
+                shellPath: tshBinary(),
                 shellArgs: ['login', `--proxy=${cluster}`],
                 iconPath: new vscode.ThemeIcon('key'),
             });

@@ -1,7 +1,43 @@
 import { execFile } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { promisify } from 'util';
 
 const exec = promisify(execFile);
+
+// VS Code launched from the Dock/Finder can inherit a minimal PATH without /usr/local/bin
+// or Homebrew, so fall back to the standard install locations when tsh isn't on PATH.
+const TSH_FALLBACK_PATHS = process.platform === 'darwin'
+    ? [
+        '/usr/local/bin/tsh',
+        '/opt/homebrew/bin/tsh',
+        '/Applications/tsh.app/Contents/MacOS/tsh',
+        '/Applications/Teleport Connect.app/Contents/MacOS/tsh.app/Contents/MacOS/tsh',
+    ]
+    : process.platform === 'win32' ? [] : ['/usr/local/bin/tsh', '/usr/bin/tsh'];
+
+let resolvedTsh: string | undefined;
+
+/** Absolute path to tsh when found, else the bare name so the OS reports it missing. */
+export function tshBinary(): string {
+    if (resolvedTsh) {
+        return resolvedTsh;
+    }
+    const name = process.platform === 'win32' ? 'tsh.exe' : 'tsh';
+    const onPath = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, name));
+    const found = [...onPath, ...TSH_FALLBACK_PATHS].find(candidate => {
+        try {
+            return fs.statSync(candidate).isFile();
+        } catch {
+            return false;
+        }
+    });
+    // Only cache a real hit, so installing tsh later is picked up without a reload.
+    if (found) {
+        resolvedTsh = found;
+    }
+    return found ?? name;
+}
 
 export interface Beam {
     id: string;
@@ -132,7 +168,7 @@ export function classifyTshError(err: unknown): TshErrorKind {
 }
 
 async function runTsh(args: string[], options?: { timeout?: number }): Promise<string> {
-    const { stdout } = await exec('tsh', args, {
+    const { stdout } = await exec(tshBinary(), args, {
         timeout: options?.timeout ?? 30000,
         maxBuffer: 50 * 1024 * 1024,
     });
@@ -367,9 +403,12 @@ export async function scpFromBeam(id: string, remotePath: string, localPath: str
 
 export async function isTshAvailable(): Promise<boolean> {
     try {
-        await exec('tsh', ['version'], { timeout: 5000 });
+        // --client skips the proxy round trip, so a slow network can't make tsh look missing.
+        await exec(tshBinary(), ['version', '--client'], { timeout: 10000 });
         return true;
-    } catch {
-        return false;
+    } catch (err: unknown) {
+        // Only a missing binary means tsh isn't installed; a timeout or non-zero exit still
+        // means it's there, and the real failure will surface from the command that follows.
+        return (err as { code?: unknown } | undefined)?.code !== 'ENOENT';
     }
 }

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
-import { execOnBeam } from './tsh';
+import { execOnBeam, tshBinary } from './tsh';
 export const SECRET_KEY = 'beams.githubPat';
 
 
@@ -26,7 +26,7 @@ const GH_INSTALL_SCRIPT = [
 
 function execScriptOnBeam(beamId: string, script: string, timeout: number): Promise<string> {
     return new Promise((resolve, reject) => {
-        const child = spawn('tsh', ['beams', 'exec', beamId, '--', 'bash', '-s'], {
+        const child = spawn(tshBinary(), ['beams', 'exec', beamId, '--', 'bash', '-s'], {
             timeout,
             stdio: ['pipe', 'pipe', 'pipe'],
         });

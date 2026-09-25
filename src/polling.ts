@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { execOnBeam, classifyTshError } from './tsh';
-import { reportTshError, resetBeamNotice } from './notify';
+import { beamStillExists, reportDisconnected, resetBeamNotice } from './notify';
 
 // Consecutive failed polls tolerated before treating the beam as gone. A single failure is
 // routinely just a slow or dropped round trip, so don't tear polling down on the first one.
@@ -170,7 +170,7 @@ export class BeamPoller implements vscode.Disposable {
             this.errorCount = 0;
         } catch (err: unknown) {
             this.errorCount++;
-            this.handlePollFailure(err);
+            void this.handlePollFailure(err);
         }
         this.gitBusy = false;
     }
@@ -202,7 +202,7 @@ export class BeamPoller implements vscode.Disposable {
             }
         } catch (err: unknown) {
             this.errorCount++;
-            this.handlePollFailure(err);
+            void this.handlePollFailure(err);
         }
         this.statBusy = false;
     }
@@ -210,13 +210,21 @@ export class BeamPoller implements vscode.Disposable {
     // Polling is the first thing to notice a beam going away. Report it once, as
     // information rather than an error (an expired beam is expected, not a fault), and stop
     // polling so a dead beam doesn't keep firing round trips or re-notifying every interval.
-    private handlePollFailure(err: unknown): void {
-        if (this.errorCount < MAX_POLL_ERRORS || classifyTshError(err) !== 'disconnected') {
+    // Git and stat errors are swallowed on the beam itself, so a failure here is transport:
+    // if tsh's wording isn't a known disconnect, confirm by checking the beam still exists.
+    private async handlePollFailure(err: unknown): Promise<void> {
+        const beamId = this.currentBeamId;
+        if (!beamId || this.errorCount < MAX_POLL_ERRORS) {
             return;
         }
-        const beamId = this.currentBeamId;
+        if (classifyTshError(err) !== 'disconnected' && await beamStillExists(beamId)) {
+            return;
+        }
+        if (this.currentBeamId !== beamId) {
+            return;
+        }
         this.stop();
-        reportTshError(err, { beamId, action: 'poll beam status' });
+        reportDisconnected(beamId);
     }
 
     dispose(): void {

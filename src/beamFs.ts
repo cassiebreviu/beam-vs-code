@@ -1,5 +1,14 @@
 import * as vscode from 'vscode';
-import { execOnBeam } from './tsh';
+import { execOnBeam, classifyTshError, tshErrorMessage } from './tsh';
+
+// VS Code surfaces a raw Error from a FileSystemProvider as-is, so a beam that has gone
+// away would show tsh's error text. Map it to Unavailable with a plain explanation.
+function toFsError(err: unknown, uri: vscode.Uri): vscode.FileSystemError {
+    if (classifyTshError(err) === 'disconnected') {
+        return vscode.FileSystemError.Unavailable(`Beam "${uri.authority}" is no longer available.`);
+    }
+    return vscode.FileSystemError.Unavailable(tshErrorMessage(err));
+}
 
 // Each `tsh beams exec` call pays a fixed ~2.3s connection-establishment cost regardless
 // of payload, so cutting the number of round trips matters far more than payload size.
@@ -112,7 +121,12 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
 
     async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
         const { beamId, remotePath } = this.parseUri(uri);
-        const output = await execOnBeam(beamId, ['ls', '-1F', remotePath]);
+        let output: string;
+        try {
+            output = await execOnBeam(beamId, ['ls', '-1F', remotePath]);
+        } catch (err) {
+            throw toFsError(err, uri);
+        }
         const entries: [string, vscode.FileType][] = [];
         for (const line of output.trim().split('\n')) {
             if (!line) continue;
@@ -150,9 +164,13 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
     async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
         const { beamId, remotePath } = this.parseUri(uri);
         const encoded = Buffer.from(content).toString('base64');
-        await execOnBeam(beamId, [
-            `echo '${encoded}' | base64 -d > ${shellQuote(remotePath)}`
-        ]);
+        try {
+            await execOnBeam(beamId, [
+                `echo '${encoded}' | base64 -d > ${shellQuote(remotePath)}`
+            ]);
+        } catch (err) {
+            throw toFsError(err, uri);
+        }
         const key = `${beamId}:${remotePath}`;
         // Update mtime cache to suppress false-positive change events from our own write
         this.mtimeCache.set(key, Math.floor(Date.now() / 1000));
@@ -164,7 +182,11 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
     async delete(uri: vscode.Uri, options: { recursive: boolean }): Promise<void> {
         const { beamId, remotePath } = this.parseUri(uri);
         const args = options.recursive ? ['rm', '-rf', remotePath] : ['rm', remotePath];
-        await execOnBeam(beamId, args);
+        try {
+            await execOnBeam(beamId, args);
+        } catch (err) {
+            throw toFsError(err, uri);
+        }
         const key = `${beamId}:${remotePath}`;
         this.statCache.delete(key);
         this.contentCache.delete(key);
@@ -177,7 +199,11 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
         if (old.beamId !== neu.beamId) {
             throw vscode.FileSystemError.NoPermissions('Cannot move between beams');
         }
-        await execOnBeam(old.beamId, ['mv', old.remotePath, neu.remotePath]);
+        try {
+            await execOnBeam(old.beamId, ['mv', old.remotePath, neu.remotePath]);
+        } catch (err) {
+            throw toFsError(err, oldUri);
+        }
         const oldKey = `${old.beamId}:${old.remotePath}`;
         this.statCache.delete(oldKey);
         this.contentCache.delete(oldKey);
@@ -189,7 +215,11 @@ export class BeamFileSystemProvider implements vscode.FileSystemProvider {
 
     async createDirectory(uri: vscode.Uri): Promise<void> {
         const { beamId, remotePath } = this.parseUri(uri);
-        await execOnBeam(beamId, ['mkdir', '-p', remotePath]);
+        try {
+            await execOnBeam(beamId, ['mkdir', '-p', remotePath]);
+        } catch (err) {
+            throw toFsError(err, uri);
+        }
     }
 
     private parseUri(uri: vscode.Uri): { beamId: string; remotePath: string } {

@@ -80,6 +80,8 @@ const DISCONNECT_PATTERNS = [
     'ssh: handshake failed',
     'failed to dial',
     'dial tcp',
+    'connection closed',
+    'use of closed network connection',
 ];
 
 const AUTH_PATTERNS = [

@@ -42,7 +42,7 @@ It notifies registered `PollConsumer` implementors. Polling pauses when VS Code 
 |------|------|
 | `extension.ts` | Activation entry point — wires all providers together and registers the `beam://` and `beam-git://` filesystem schemes |
 | `tsh.ts` | All tsh CLI interactions; defines the `Beam` and `TshStatus` types, plus `classifyTshError` which sorts failures into `disconnected` / `auth` / `other` |
-| `notify.ts` | `reportTshError` — picks notification severity from the error class (a gone beam is info, expired login is a warning with a Login action, anything else is an error) and dedupes repeats per beam within 30s |
+| `notify.ts` | `reportTshError` — picks notification severity from the error class (a gone beam is info, expired login is a warning with a Login action, anything else is an error). A disconnect notice shows once per beam until it's reselected; an unclassified failure first checks `tsh beams ls` and is reported as a disconnect if the beam is gone; other repeats are deduped within 30s |
 | `beamsProvider.ts` | `TreeDataProvider` for the Beams panel list |
 | `clusters.ts` | `ClustersProvider` — Clusters panel listing logged-in Teleport profiles (`active` + `profiles[]` from `tsh status --format=json`). Note this lists *profiles you have logged into*, not clusters reachable through the proxy — with a single login it renders exactly one row |
 | `beamFs.ts` | `FileSystemProvider` for `beam://` URIs — reads/writes remote files via `tsh beams exec` |
